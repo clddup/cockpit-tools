@@ -7,6 +7,30 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ---
+## [0.23.10] - 2026-05-18
+
+### 修复
+- **Codex CLI 通过本地 API 服务访问时现可稳定使用 Cockpit 管理的 OAuth 账号**：`/v1/responses` 请求会先按 Codex 客户端兼容形状规范化，再转发到现有上游管线。
+- **Codex 启动时不再因模型刷新结构不匹配报错**：当 Codex 客户端请求本地 `/v1/models` 时，会返回其期望的模型列表格式。
+- **本地 Codex API 服务请求现可绕过 localhost 代理干扰**：`NO_PROXY`/`no_proxy` 会自动合并回环地址，系统代理开启时本地网关仍保持直连。
+
+---
+## [0.23.9] - 2026-05-17
+
+### 新增
+- **Codex Token 导入现支持仅 accessToken 与 Sub2API 导出格式**：Codex 导入可读取原始 JWT access token、`accessToken`/`access_token` 字段、camelCase token JSON、逐行 Token 输入，以及 Sub2API 导出 JSON 中的 OpenAI OAuth 账号。
+- **macOS 菜单栏图标样式现可配置**：设置页可在系统单色状态图标和原彩色 App 图标之间切换；保存设置或导入用户配置变化后，会即时应用所选样式。
+
+### 变更
+- **Codex API Key 切号现写入官方运行时 provider 状态**：API Key 账号会将所选供应商写入受管 `codex_local_access` provider，并把 bearer token 写入 `config.toml`，同时保留供应商身份配置并避免残留 `openai_base_url` 状态。
+- **Codex OAuth 导入现从 access token 保留更多身份元数据**：仅 accessToken 导入会在 claim 可用时提取邮箱、用户 ID、套餐、账号 ID、组织 ID 与订阅到期时间。
+
+### 修复
+- **macOS 打包版本现可正常显示单色菜单栏图标**：使用前会将 template 托盘图标规范化到菜单栏尺寸，并在托盘创建后再次应用 template 标记。
+- **Codex 切回内置 OpenAI 时现会清理受管 API Key 运行时 provider 状态**：切回内置路径会移除 Cockpit 管理的 provider/token 条目，同时保留无关的手动 provider。
+- **Cursor 额度徽标在 70%+ 用量时现使用预期的中档样式**：额度指示不再在达到临界范围前提前使用警告样式。
+
+---
 ## [0.23.8] - 2026-05-17
 
 ### 新增
