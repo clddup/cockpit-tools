@@ -3836,9 +3836,26 @@ async fn import_accounts_from_refresh_token_lines(
     }
 
     let mut accounts = Vec::with_capacity(refresh_tokens.len());
-    for refresh_token in refresh_tokens {
-        accounts.push(upsert_account_from_refresh_token(refresh_token, None).await?);
+    let mut failures = Vec::new();
+    for (index, refresh_token) in refresh_tokens.into_iter().enumerate() {
+        match upsert_account_from_refresh_token(refresh_token, None).await {
+            Ok(account) => accounts.push(account),
+            Err(error) => {
+                let message = format!("第 {} 个 refresh_token 导入失败: {}", index + 1, error);
+                logger::log_warn(&format!("Codex 批量 refresh_token 导入跳过失败项: {}", message));
+                failures.push(message);
+            }
+        }
     }
+
+    if accounts.is_empty() {
+        return Err(if failures.is_empty() {
+            "未导入任何 Codex 账号".to_string()
+        } else {
+            failures.join("; ")
+        });
+    }
+
     Ok(accounts)
 }
 
@@ -4037,15 +4054,29 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
             }
             serde_json::Value::Array(items) => {
                 let mut result = Vec::new();
+                let mut failures = Vec::new();
 
-                for item in items {
-                    if let Some(account) = import_account_from_json_value(item).await? {
-                        result.push(account);
+                for (index, item) in items.into_iter().enumerate() {
+                    match import_account_from_json_value(item).await {
+                        Ok(Some(account)) => result.push(account),
+                        Ok(None) => failures.push(format!(
+                            "第 {} 项未找到有效的 Codex Token 或 refresh_token",
+                            index + 1
+                        )),
+                        Err(error) => {
+                            let message = format!("第 {} 项导入失败: {}", index + 1, error);
+                            logger::log_warn(&format!("Codex JSON 数组导入跳过失败项: {}", message));
+                            failures.push(message);
+                        }
                     }
                 }
 
                 if !result.is_empty() {
                     return Ok(result);
+                }
+
+                if !failures.is_empty() {
+                    return Err(failures.join("; "));
                 }
             }
             _ => {}
@@ -4053,16 +4084,24 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
     }
 
     if let Some(items) = parse_line_delimited_json_values(json_content)? {
+        let total_items = items.len();
         let mut result = Vec::new();
 
         for (index, item) in items.into_iter().enumerate() {
-            match import_account_from_json_value(item).await? {
-                Some(account) => result.push(account),
-                None => {
+            match import_account_from_json_value(item).await {
+                Ok(Some(account)) => result.push(account),
+                Ok(None) => {
                     return Err(format!(
                         "第 {} 行未找到有效的 Codex Token 或 refresh_token",
                         index + 1
                     ));
+                }
+                Err(error) => {
+                    let message = format!("第 {} 行导入失败: {}", index + 1, error);
+                    logger::log_warn(&format!("Codex 逐行 JSON 导入跳过失败项: {}", message));
+                    if result.is_empty() && index + 1 == total_items {
+                        return Err(message);
+                    }
                 }
             }
         }
