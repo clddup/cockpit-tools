@@ -4092,9 +4092,9 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
         return Err("Token 不能为空".to_string());
     }
 
-    let mut accounts = Vec::with_capacity(refresh_tokens.len());
+    let mut accounts = Vec::with_capacity(lines.len());
     let mut failures = Vec::new();
-    for (index, refresh_token) in refresh_tokens.into_iter().enumerate() {
+    for (index, refresh_token) in lines.into_iter().enumerate() {
         match upsert_account_from_refresh_token(refresh_token, None).await {
             Ok(account) => accounts.push(account),
             Err(error) => {
