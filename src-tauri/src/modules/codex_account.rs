@@ -3,8 +3,8 @@ use crate::models::codex::{
     CodexAuthFile, CodexAuthMode, CodexAuthTokens, CodexJwtPayload, CodexQuickConfig, CodexTokens,
 };
 use crate::modules::{account, codex_oauth, logger};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
 #[cfg(target_os = "macos")]
 #[cfg(all(target_os = "macos", not(test)))]
 use sha2::{Digest, Sha256};
@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use toml_edit::{value, Document};
+use toml_edit::{Document, value};
 
 static CODEX_QUOTA_ALERT_LAST_SENT: std::sync::LazyLock<Mutex<HashMap<String, i64>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -3865,6 +3865,90 @@ fn extract_account_note_from_value(value: &serde_json::Value) -> Option<String> 
     })
 }
 
+fn is_codex_session_object(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    let has_access_token = first_json_string(value, &[&["accessToken"], &["access_token"]])
+        .filter(|token| decode_jwt_payload_value(token).is_some())
+        .is_some();
+    if !has_access_token {
+        return false;
+    }
+
+    obj.get("user").and_then(|item| item.as_object()).is_some()
+        || obj
+            .get("account")
+            .and_then(|item| item.as_object())
+            .is_some()
+        || obj.get("expires").is_some()
+        || obj.get("sessionToken").is_some()
+        || obj
+            .get("authProvider")
+            .and_then(|item| item.as_str())
+            .map(|provider| provider.eq_ignore_ascii_case("openai"))
+            .unwrap_or(false)
+}
+
+fn normalize_codex_session_value(
+    value: &serde_json::Value,
+    depth: usize,
+) -> Option<serde_json::Value> {
+    if depth > 4 {
+        return None;
+    }
+    let obj = value.as_object()?;
+
+    for key in ["session_json", "session"] {
+        let Some(nested) = obj.get(key) else {
+            continue;
+        };
+        match nested {
+            serde_json::Value::Object(_) => {
+                if let Some(session) = normalize_codex_session_value(nested, depth + 1) {
+                    return Some(session);
+                }
+            }
+            serde_json::Value::String(raw) => {
+                let parsed = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+                if let Some(session) = normalize_codex_session_value(&parsed, depth + 1) {
+                    return Some(session);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if is_codex_session_object(value) {
+        return Some(value.clone());
+    }
+
+    None
+}
+
+fn extract_codex_session_candidate_from_value(
+    value: &serde_json::Value,
+) -> Option<CodexJsonImportCandidate> {
+    let session = normalize_codex_session_value(value, 0)?;
+    let access_token = first_json_string(&session, &[&["accessToken"], &["access_token"]])
+        .filter(|token| decode_jwt_payload_value(token).is_some())?;
+    let id_token = first_json_string(&session, &[&["idToken"], &["id_token"]])
+        .unwrap_or_else(|| access_token.clone());
+    let refresh_token = first_json_string(&session, &[&["refreshToken"], &["refresh_token"]]);
+    let account_id_hint = first_json_string(&session, &[&["account", "id"], &["account_id"]]);
+
+    Some(CodexJsonImportCandidate::FullToken {
+        tokens: CodexTokens {
+            id_token,
+            access_token,
+            refresh_token,
+        },
+        account_id_hint,
+        account_note: extract_account_note_from_value(value)
+            .or_else(|| extract_account_note_from_value(&session)),
+    })
+}
+
 fn extract_refresh_token_only_from_value(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::String(raw) => normalize_optional_ref(Some(raw))
@@ -3906,6 +3990,10 @@ fn extract_access_token_only_from_value(value: &serde_json::Value) -> Option<Str
 fn extract_codex_import_candidate_from_value(
     value: &serde_json::Value,
 ) -> Option<CodexJsonImportCandidate> {
+    if let Some(candidate) = extract_codex_session_candidate_from_value(value) {
+        return Some(candidate);
+    }
+
     if let Some((tokens, account_id_hint)) = extract_codex_tokens_from_value(value) {
         return Some(CodexJsonImportCandidate::FullToken {
             tokens,
@@ -4109,14 +4197,36 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
     let total = lines.len();
     let mut accounts = Vec::with_capacity(total);
     let mut failures = Vec::new();
-    for (index, refresh_token) in lines.into_iter().enumerate() {
+
+    for (index, line) in lines.into_iter().enumerate() {
         emit_json_import_progress(index + 1, total, None);
-        match upsert_account_from_refresh_token(refresh_token, None).await {
-            Ok(account) => accounts.push(account),
-            Err(error) => {
-                let message = format!("第 {} 个 refresh_token 导入失败: {}", index + 1, error);
-                logger::log_warn(&format!("Codex 批量 refresh_token 导入跳过失败项: {}", message));
-                failures.push(message);
+        let values = match serde_json::from_str::<serde_json::Value>(&line) {
+            Ok(serde_json::Value::Array(items)) => items,
+            Ok(value) => vec![value],
+            Err(_) => vec![serde_json::Value::String(line)],
+        };
+
+        for value in values {
+            let candidate = match extract_codex_import_candidate_from_value(&value) {
+                Some(candidate) => candidate,
+                None => {
+                    let message = format!(
+                        "第 {} 个 token 导入失败: 未找到有效的 Codex Token（需要 session JSON、accessToken/access_token、id_token + access_token，或 refresh_token）",
+                        index + 1
+                    );
+                    logger::log_warn(&format!("Codex 批量 token 导入跳过失败项: {}", message));
+                    failures.push(message);
+                    continue;
+                }
+            };
+
+            match import_codex_candidate(candidate).await {
+                Ok(account) => accounts.push(account),
+                Err(error) => {
+                    let message = format!("第 {} 个 token 导入失败: {}", index + 1, error);
+                    logger::log_warn(&format!("Codex 批量 token 导入跳过失败项: {}", message));
+                    failures.push(message);
+                }
             }
         }
     }
@@ -4128,7 +4238,6 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
             failures.join("; ")
         });
     }
-
 
     Ok(accounts)
 }
@@ -4376,7 +4485,10 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
                         )),
                         Err(error) => {
                             let message = format!("第 {} 项导入失败: {}", index + 1, error);
-                            logger::log_warn(&format!("Codex JSON 数组导入跳过失败项: {}", message));
+                            logger::log_warn(&format!(
+                                "Codex JSON 数组导入跳过失败项: {}",
+                                message
+                            ));
                             failures.push(message);
                         }
                     }
@@ -4404,7 +4516,7 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
                 Ok(Some(account)) => result.push(account),
                 Ok(None) => {
                     return Err(format!(
-                        "第 {} 行未找到有效的 Codex Token（需要 accessToken/access_token、id_token + access_token，或 refresh_token）",
+                        "第 {} 行未找到有效的 Codex Token（需要 session JSON、accessToken/access_token、id_token + access_token，或 refresh_token）",
                         index + 1
                     ));
                 }
@@ -4557,7 +4669,10 @@ fn extract_codex_tokens_from_value(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_account_storage_id, decode_jwt_payload_value, detect_auth_file_plan_type_from_path,
+        ApiProviderConfig, CODEX_AUTO_COMPACT_DEFAULT_LIMIT, CODEX_CONTEXT_WINDOW_1M_VALUE,
+        CodexAccountIndex, CodexAccountSummary, CodexAuthFile, CodexAuthTokens,
+        CodexJsonImportCandidate, LocalCodexOAuthSnapshot, build_account_storage_id,
+        decode_jwt_payload_value, detect_auth_file_plan_type_from_path,
         extract_codex_import_candidate_from_value, extract_codex_tokens_from_value,
         extract_user_info, format_refresh_error_for_user, get_accounts_dir,
         get_accounts_storage_path, get_current_account, list_accounts_checked, load_account,
@@ -4569,13 +4684,10 @@ mod tests {
         sync_managed_projection_from_auth_dir, upsert_account_from_access_token,
         upsert_account_from_auth_tokens, validate_api_key_credentials,
         write_api_key_provider_to_config_toml, write_api_provider_to_config_toml,
-        write_managed_projection_to_dir, write_quick_config_to_config_toml, ApiProviderConfig,
-        CodexAccountIndex, CodexAccountSummary, CodexAuthFile, CodexAuthTokens,
-        CodexJsonImportCandidate, LocalCodexOAuthSnapshot, CODEX_AUTO_COMPACT_DEFAULT_LIMIT,
-        CODEX_CONTEXT_WINDOW_1M_VALUE,
+        write_managed_projection_to_dir, write_quick_config_to_config_toml,
     };
     use crate::models::codex::{CodexAccount, CodexApiProviderMode, CodexTokens};
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use std::fs;
     use std::sync::{LazyLock, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -4924,6 +5036,94 @@ mod tests {
             extract_codex_import_candidate_from_value(&plain_token_value).is_none(),
             "plain token fields should not be treated as accessToken-only"
         );
+    }
+
+    #[test]
+    fn extract_candidate_from_codex_session_json_as_cpa_tokens() {
+        let access_token = make_jwt(serde_json::json!({
+            "sub": "auth0|session-user",
+            "https://api.openai.com/profile": {
+                "email": "session@example.com",
+                "email_verified": true
+            },
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acc-session-token",
+                "chatgpt_user_id": "user-session",
+                "chatgpt_plan_type": "plus"
+            }
+        }));
+        let session = serde_json::json!({
+            "user": {
+                "id": "user-session",
+                "email": "session@example.com"
+            },
+            "expires": "2026-08-17T02:06:40.890Z",
+            "account": {
+                "id": "acc-session",
+                "planType": "plus"
+            },
+            "accessToken": access_token,
+            "authProvider": "openai",
+            "sessionToken": "encrypted-session"
+        });
+
+        let candidate = extract_codex_import_candidate_from_value(&session)
+            .expect("ChatGPT session JSON should be accepted");
+
+        match candidate {
+            CodexJsonImportCandidate::FullToken {
+                tokens,
+                account_id_hint,
+                account_note,
+            } => {
+                assert_eq!(tokens.id_token, tokens.access_token);
+                assert_eq!(tokens.refresh_token, None);
+                assert_eq!(account_id_hint.as_deref(), Some("acc-session"));
+                assert_eq!(account_note, None);
+                assert!(decode_jwt_payload_value(&tokens.access_token).is_some());
+            }
+            _ => panic!("expected session JSON to be normalized to full CPA-style tokens"),
+        }
+    }
+
+    #[test]
+    fn extract_candidate_from_wrapped_codex_session_json_string() {
+        let access_token = make_jwt(serde_json::json!({
+            "email": "wrapped-session@example.com",
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acc-wrapped-session"
+            }
+        }));
+        let session = serde_json::json!({
+            "user": {
+                "email": "wrapped-session@example.com"
+            },
+            "account": {
+                "id": "acc-wrapped-session"
+            },
+            "accessToken": access_token,
+            "refreshToken": "rt_wrapped",
+            "authProvider": "openai"
+        });
+        let wrapper = serde_json::json!({
+            "session_json": serde_json::to_string(&session).expect("serialize session")
+        });
+
+        let candidate = extract_codex_import_candidate_from_value(&wrapper)
+            .expect("wrapped session JSON string should be accepted");
+
+        match candidate {
+            CodexJsonImportCandidate::FullToken {
+                tokens,
+                account_id_hint,
+                ..
+            } => {
+                assert_eq!(tokens.id_token, tokens.access_token);
+                assert_eq!(tokens.refresh_token.as_deref(), Some("rt_wrapped"));
+                assert_eq!(account_id_hint.as_deref(), Some("acc-wrapped-session"));
+            }
+            _ => panic!("expected wrapped session JSON to become full CPA-style tokens"),
+        }
     }
 
     #[test]
@@ -6487,8 +6687,8 @@ pub fn pick_auto_switch_target_if_needed() -> Result<Option<CodexAccount>, Strin
     result
 }
 
-pub fn run_quota_alert_if_needed(
-) -> Result<Option<crate::modules::account::QuotaAlertPayload>, String> {
+pub fn run_quota_alert_if_needed()
+-> Result<Option<crate::modules::account::QuotaAlertPayload>, String> {
     let cfg = crate::modules::config::get_user_config();
     if !cfg.codex_quota_alert_enabled {
         return Ok(None);
