@@ -415,14 +415,26 @@ async fn refresh_imported_codex_accounts(
     let mut result = Vec::with_capacity(accounts.len());
     let mut success_count = 0;
     let mut attempted = false;
+    let total = accounts.len();
 
-    for account in accounts {
+    for (index, account) in accounts.into_iter().enumerate() {
         if account.is_api_key_auth() {
             result.push(account);
             continue;
         }
 
         attempted = true;
+        {
+            use tauri::Emitter;
+            let _ = app.emit(
+                "codex:json-import-progress",
+                serde_json::json!({
+                    "current": index + 1,
+                    "total": total,
+                    "phase": "refresh",
+                }),
+            );
+        }
         match codex_quota::refresh_account_quota(&account.id).await {
             Ok(_) => {
                 success_count += 1;

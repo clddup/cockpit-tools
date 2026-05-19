@@ -4082,6 +4082,20 @@ async fn import_codex_candidate(
     }
 }
 
+fn emit_json_import_progress(current: usize, total: usize, label: Option<&str>) {
+    if let Some(app_handle) = crate::get_app_handle() {
+        use tauri::Emitter;
+        let _ = app_handle.emit(
+            "codex:json-import-progress",
+            serde_json::json!({
+                "current": current,
+                "total": total,
+                "label": label.unwrap_or(""),
+            }),
+        );
+    }
+}
+
 async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAccount>, String> {
     let lines: Vec<String> = content
         .lines()
@@ -4092,9 +4106,11 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
         return Err("Token 不能为空".to_string());
     }
 
-    let mut accounts = Vec::with_capacity(lines.len());
+    let total = lines.len();
+    let mut accounts = Vec::with_capacity(total);
     let mut failures = Vec::new();
     for (index, refresh_token) in lines.into_iter().enumerate() {
+        emit_json_import_progress(index + 1, total, None);
         match upsert_account_from_refresh_token(refresh_token, None).await {
             Ok(account) => accounts.push(account),
             Err(error) => {
@@ -4348,8 +4364,10 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
             serde_json::Value::Array(items) => {
                 let mut result = Vec::new();
                 let mut failures = Vec::new();
+                let total = items.len();
 
                 for (index, item) in items.into_iter().enumerate() {
+                    emit_json_import_progress(index + 1, total, None);
                     match import_account_from_json_value(item).await {
                         Ok(Some(account)) => result.push(account),
                         Ok(None) => failures.push(format!(
@@ -4381,6 +4399,7 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
         let mut result = Vec::new();
 
         for (index, item) in items.into_iter().enumerate() {
+            emit_json_import_progress(index + 1, total_items, None);
             match import_account_from_json_value(item).await {
                 Ok(Some(account)) => result.push(account),
                 Ok(None) => {

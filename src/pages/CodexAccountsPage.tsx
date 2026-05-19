@@ -3565,7 +3565,25 @@ export function CodexAccountsPage() {
     }
     page.setAddStatus("loading");
     page.setAddMessage(t("common.shared.token.importing", "正在导入..."));
+    let unlistenProgress: UnlistenFn | undefined;
     try {
+      unlistenProgress = await listen<{ current: number; total: number; label?: string; phase?: string }>(
+        "codex:json-import-progress",
+        (event) => {
+          const { current, total, phase } = event.payload;
+          if (phase === "refresh") {
+            page.setAddMessage(
+              t("common.shared.token.importing", "正在导入...") +
+                ` ${t("codex.import.refreshing", "刷新配额")} (${current}/${total})`,
+            );
+          } else {
+            page.setAddMessage(
+              t("common.shared.token.importing", "正在导入...") +
+                ` (${current}/${total})`,
+            );
+          }
+        },
+      );
       const imported = await codexService.importCodexFromJson(trimmed);
       await fetchAccounts();
       if (imported.length > 0) {
@@ -3592,6 +3610,8 @@ export function CodexAccountsPage() {
           String(e).replace(/^Error:\s*/, ""),
         ),
       );
+    } finally {
+      unlistenProgress?.();
     }
   };
 
@@ -4122,7 +4142,8 @@ export function CodexAccountsPage() {
   );
 
   const isAbnormalAccount = useCallback(
-    (account: CodexAccount) => Boolean(account.quota_error),
+    (account: CodexAccount) =>
+      Boolean(account.quota_error) || Boolean(account.requires_reauth),
     [],
   );
 
@@ -4372,7 +4393,9 @@ export function CodexAccountsPage() {
       PRO: 0,
       TEAM: 0,
       ENTERPRISE: 0,
-      ERROR: 0,
+      AUTH_ERROR: 0,
+      QUOTA_ERROR: 0,
+      REFRESH_FAILED: 0,
     };
     overviewAccounts.forEach((a) => {
       if (!isAbnormalAccount(a)) {
@@ -4380,7 +4403,20 @@ export function CodexAccountsPage() {
       }
       const tier = resolvePlanKey(a);
       if (tier in counts) counts[tier as keyof typeof counts] += 1;
-      if (a.quota_error) counts.ERROR += 1;
+      if (a.requires_reauth) {
+        counts.AUTH_ERROR += 1;
+      } else if (a.quota_error) {
+        const msg = (a.quota_error.message || "").toLowerCase();
+        const isNetworkFailure =
+          msg.includes("error sending request") &&
+          !a.quota_error.code &&
+          !/API 返回错误\s+\d{3}/i.test(a.quota_error.message);
+        if (isNetworkFailure) {
+          counts.REFRESH_FAILED += 1;
+        } else {
+          counts.QUOTA_ERROR += 1;
+        }
+      }
     });
     return counts;
   }, [isAbnormalAccount, overviewAccounts, resolvePlanKey]);
@@ -4392,7 +4428,9 @@ export function CodexAccountsPage() {
       { value: "PRO", label: `PRO (${tierCounts.PRO})` },
       { value: "TEAM", label: `TEAM (${tierCounts.TEAM})` },
       { value: "ENTERPRISE", label: `ENTERPRISE (${tierCounts.ENTERPRISE})` },
-      { value: "ERROR", label: `ERROR (${tierCounts.ERROR})` },
+      { value: "AUTH_ERROR", label: `${t("codex.authError.badge", "授权异常")} (${tierCounts.AUTH_ERROR})` },
+      { value: "QUOTA_ERROR", label: `${t("codex.quotaError.badge", "配额异常")} (${tierCounts.QUOTA_ERROR})` },
+      { value: "REFRESH_FAILED", label: `${t("codex.quotaError.refreshFailedBadge", "刷新失败")} (${tierCounts.REFRESH_FAILED})` },
       buildValidAccountsFilterOption(t, tierCounts.VALID),
     ],
     [t, tierCounts],
@@ -4407,7 +4445,9 @@ export function CodexAccountsPage() {
       PRO: 0,
       TEAM: 0,
       ENTERPRISE: 0,
-      ERROR: 0,
+      AUTH_ERROR: 0,
+      QUOTA_ERROR: 0,
+      REFRESH_FAILED: 0,
     };
     oauthAccounts.forEach((account) => {
       if (!isAbnormalAccount(account)) {
@@ -4415,7 +4455,20 @@ export function CodexAccountsPage() {
       }
       const tier = resolvePlanKey(account);
       if (tier in counts) counts[tier as keyof typeof counts] += 1;
-      if (account.quota_error) counts.ERROR += 1;
+      if (account.requires_reauth) {
+        counts.AUTH_ERROR += 1;
+      } else if (account.quota_error) {
+        const msg = (account.quota_error.message || "").toLowerCase();
+        const isNetworkFailure =
+          msg.includes("error sending request") &&
+          !account.quota_error.code &&
+          !/API 返回错误\s+\d{3}/i.test(account.quota_error.message);
+        if (isNetworkFailure) {
+          counts.REFRESH_FAILED += 1;
+        } else {
+          counts.QUOTA_ERROR += 1;
+        }
+      }
     });
     return counts;
   }, [isAbnormalAccount, oauthAccounts, resolvePlanKey]);
@@ -4430,7 +4483,9 @@ export function CodexAccountsPage() {
         value: "ENTERPRISE",
         label: `ENTERPRISE (${oauthBindingTierCounts.ENTERPRISE})`,
       },
-      { value: "ERROR", label: `ERROR (${oauthBindingTierCounts.ERROR})` },
+      { value: "AUTH_ERROR", label: `${t("codex.authError.badge", "授权异常")} (${oauthBindingTierCounts.AUTH_ERROR})` },
+      { value: "QUOTA_ERROR", label: `${t("codex.quotaError.badge", "配额异常")} (${oauthBindingTierCounts.QUOTA_ERROR})` },
+      { value: "REFRESH_FAILED", label: `${t("codex.quotaError.refreshFailedBadge", "刷新失败")} (${oauthBindingTierCounts.REFRESH_FAILED})` },
       buildValidAccountsFilterOption(t, oauthBindingTierCounts.VALID),
     ],
     [oauthBindingTierCounts, t],
@@ -4495,8 +4550,21 @@ export function CodexAccountsPage() {
       }
       if (selectedTypes.size > 0) {
         result = result.filter((account) => {
-          if (selectedTypes.has("ERROR") && account.quota_error) {
+          if (selectedTypes.has("AUTH_ERROR") && account.requires_reauth) {
             return true;
+          }
+          if (account.quota_error && !account.requires_reauth) {
+            const msg = (account.quota_error.message || "").toLowerCase();
+            const isNetworkFailure =
+              msg.includes("error sending request") &&
+              !account.quota_error.code &&
+              !/API 返回错误\s+\d{3}/i.test(account.quota_error.message);
+            if (selectedTypes.has("REFRESH_FAILED") && isNetworkFailure) {
+              return true;
+            }
+            if (selectedTypes.has("QUOTA_ERROR") && !isNetworkFailure) {
+              return true;
+            }
           }
           return selectedTypes.has(resolvePlanKey(account));
         });
@@ -5216,8 +5284,21 @@ export function CodexAccountsPage() {
       }
       if (selectedTypes.size > 0) {
         result = result.filter((a) => {
-          if (selectedTypes.has("ERROR") && a.quota_error) {
+          if (selectedTypes.has("AUTH_ERROR") && a.requires_reauth) {
             return true;
+          }
+          if (a.quota_error && !a.requires_reauth) {
+            const msg = (a.quota_error.message || "").toLowerCase();
+            const isNetworkFailure =
+              msg.includes("error sending request") &&
+              !a.quota_error.code &&
+              !/API 返回错误\s+\d{3}/i.test(a.quota_error.message);
+            if (selectedTypes.has("REFRESH_FAILED") && isNetworkFailure) {
+              return true;
+            }
+            if (selectedTypes.has("QUOTA_ERROR") && !isNetworkFailure) {
+              return true;
+            }
           }
           return selectedTypes.has(resolvePlanKey(a));
         });

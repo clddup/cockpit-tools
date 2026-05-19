@@ -16,6 +16,9 @@ const CODEX_CURRENT_ACCOUNT_CACHE_KEY = 'agtools.codex.accounts.current';
 const CODEX_PROFILE_SYNC_IN_FLIGHT = new Set<string>();
 const CODEX_PROFILE_SYNC_LAST_ATTEMPT = new Map<string, number>();
 const CODEX_PROFILE_SYNC_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+const CODEX_PROFILE_HYDRATE_BUFFER = new Map<string, CodexAccount>();
+let CODEX_PROFILE_HYDRATE_FLUSH_TIMER: ReturnType<typeof setTimeout> | null = null;
+const CODEX_PROFILE_HYDRATE_FLUSH_INTERVAL_MS = 2000;
 let allowNextEmptyCodexAccountList = false;
 let allowNextEmptyCodexCurrentAccount = false;
 
@@ -244,34 +247,61 @@ export const useCodexAccountStore = create<CodexAccountState>((set, get) => ({
           CODEX_PROFILE_SYNC_RETRY_INTERVAL_MS,
     );
 
-    for (const account of candidates) {
-      CODEX_PROFILE_SYNC_IN_FLIGHT.add(account.id);
-      CODEX_PROFILE_SYNC_LAST_ATTEMPT.set(account.id, now);
-      try {
-        const updatedAccount = await codexService.refreshCodexAccountProfile(account.id);
-        set((state) => {
-          const nextAccounts = state.accounts.map((item) =>
-            item.id === updatedAccount.id ? { ...item, ...updatedAccount } : item,
-          );
-          const nextCurrentAccount =
-            state.currentAccount?.id === updatedAccount.id
-              ? { ...state.currentAccount, ...updatedAccount }
-              : state.currentAccount;
+    if (candidates.length === 0) return;
 
-          persistCodexAccountsCache(nextAccounts);
-          persistCodexCurrentAccountCache(nextCurrentAccount);
+    const flushBuffer = () => {
+      if (CODEX_PROFILE_HYDRATE_BUFFER.size === 0) return;
+      const updates = new Map(CODEX_PROFILE_HYDRATE_BUFFER);
+      CODEX_PROFILE_HYDRATE_BUFFER.clear();
+      set((state) => {
+        const nextAccounts = state.accounts.map((item) =>
+          updates.has(item.id) ? { ...item, ...updates.get(item.id)! } : item,
+        );
+        const nextCurrentAccount =
+          state.currentAccount && updates.has(state.currentAccount.id)
+            ? { ...state.currentAccount, ...updates.get(state.currentAccount.id)! }
+            : state.currentAccount;
+        persistCodexAccountsCache(nextAccounts);
+        persistCodexCurrentAccountCache(nextCurrentAccount);
+        return { accounts: nextAccounts, currentAccount: nextCurrentAccount };
+      });
+    };
 
-          return {
-            accounts: nextAccounts,
-            currentAccount: nextCurrentAccount,
-          };
-        });
-      } catch (e) {
-        console.warn('刷新 Codex 账号资料失败:', account.id, e);
-      } finally {
-        CODEX_PROFILE_SYNC_IN_FLIGHT.delete(account.id);
+    const scheduleFlush = () => {
+      if (CODEX_PROFILE_HYDRATE_FLUSH_TIMER) return;
+      CODEX_PROFILE_HYDRATE_FLUSH_TIMER = setTimeout(() => {
+        CODEX_PROFILE_HYDRATE_FLUSH_TIMER = null;
+        flushBuffer();
+      }, CODEX_PROFILE_HYDRATE_FLUSH_INTERVAL_MS);
+    };
+
+    const CONCURRENCY = 5;
+    let index = 0;
+
+    const runNext = async (): Promise<void> => {
+      while (index < candidates.length) {
+        const account = candidates[index++];
+        CODEX_PROFILE_SYNC_IN_FLIGHT.add(account.id);
+        CODEX_PROFILE_SYNC_LAST_ATTEMPT.set(account.id, now);
+        try {
+          const updatedAccount = await codexService.refreshCodexAccountProfile(account.id);
+          CODEX_PROFILE_HYDRATE_BUFFER.set(updatedAccount.id, updatedAccount);
+          scheduleFlush();
+        } catch (e) {
+          console.warn('刷新 Codex 账号资料失败:', account.id, e);
+        } finally {
+          CODEX_PROFILE_SYNC_IN_FLIGHT.delete(account.id);
+        }
       }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, () => runNext()));
+
+    if (CODEX_PROFILE_HYDRATE_FLUSH_TIMER) {
+      clearTimeout(CODEX_PROFILE_HYDRATE_FLUSH_TIMER);
+      CODEX_PROFILE_HYDRATE_FLUSH_TIMER = null;
     }
+    flushBuffer();
   },
   
   importFromLocal: async () => {
