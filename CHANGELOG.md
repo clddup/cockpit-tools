@@ -7,6 +7,39 @@ All notable changes to Cockpit Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
+## [0.24.3] - 2026-05-21
+
+### Changed
+- **Emergency fix for Codex Local API Service routing when no explicit proxy is configured**: API proxy URL, Cockpit global proxy, and environment proxy variables are still preferred in order, while the service now falls through to reqwest's system proxy discovery instead of stopping before the system auto-proxy path can be used.
+- **Antigravity installed-version lookup now separates quick badge reads from full scans**: the overview badge starts after a short delay, uses cached metadata when possible, and completes a longer scan in the background so version display does not block the page.
+- **Codex plan badges now reuse the raw account plan value with shared styling**: account cards, summaries, and routing views keep backend/local plan labels unchanged while using one presentation path for badge classes.
+
+### Fixed
+- **Legacy Antigravity account switching no longer fails when installed-version metadata is unavailable or unparseable**: cached known versions still block Antigravity `2.0.0` and later, while missing cache data allows the legacy path to proceed.
+- **Codex custom routing account lists now keep their header and rows within a bounded scroll area**: the modal body scrolls correctly and plan badges keep stable sizing in narrow layouts.
+
+---
+## [0.24.2] - 2026-05-21
+
+### Fixed
+- **Emergency fix for Codex Local API Service proxy routing after v0.24.1**: empty API proxy URLs now fall back to the Cockpit global proxy and then explicit environment proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`), and the gateway refuses official upstream requests when no proxy URL is available instead of falling back to unintended direct upstream access.
+- **Codex Local API Service upstream failures now identify the active proxy source**: 502 diagnostics and logs report whether the API service proxy, Cockpit global proxy, environment proxy, or missing proxy configuration was used so users can correct network routing quickly.
+
+---
+## [0.24.1] - 2026-05-21
+
+### Added
+- **Antigravity overview now shows the installed version for the selected target**: the version badge follows the active Antigravity or Antigravity IDE target so users can confirm which local client is being managed.
+
+### Changed
+- **Antigravity is now managed as one group with separate Antigravity and Antigravity IDE targets**: Platform Management keeps the Antigravity group first, and the group switcher controls which target is used for overview actions, version lookup, and account switching.
+- **Legacy Antigravity switching is now gated by the installed version**: Antigravity versions below `2.0.0` continue to use the legacy disk and launch paths, while Antigravity `2.0.0` and later are blocked with guidance to use Antigravity IDE.
+- **Codex Local API Service proxy configuration now uses a dedicated API proxy URL**: the service validates the configured proxy address, applies it only to API upstream traffic, and uses direct upstream access when the address is empty.
+
+### Fixed
+- **Antigravity IDE path and version detection now follows the renamed official install layout**: macOS, Windows, and Linux detection distinguish legacy Antigravity from Antigravity IDE and resolve the correct app metadata and executable candidates.
+
+---
 ## [0.24.0] - 2026-05-20
 
 ### Changed
