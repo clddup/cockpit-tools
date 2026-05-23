@@ -18,6 +18,7 @@ These commits describe the current local customization set relative to `origin/m
 - `c9d71fc feat: codex导入不阻塞`
 - `eff496d fix: 修复构建错误 - 对齐 tauri 版本并修复变量名`
 - `79b8b6a feat: 优化导入性能、添加导入进度显示、拆分异常筛选`
+- `bdb9d75 optimize account batch deletion`
 
 ## Watched files
 
@@ -28,7 +29,18 @@ When syncing upstream, compare upstream-changed files against this list first:
 - `package.json`
 - `pnpm-lock.yaml`
 - `src-tauri/src/commands/codex.rs`
+- `src-tauri/src/modules/codebuddy_account.rs`
+- `src-tauri/src/modules/codebuddy_cn_account.rs`
 - `src-tauri/src/modules/codex_account.rs`
+- `src-tauri/src/modules/cursor_account.rs`
+- `src-tauri/src/modules/gemini_account.rs`
+- `src-tauri/src/modules/github_copilot_account.rs`
+- `src-tauri/src/modules/kiro_account.rs`
+- `src-tauri/src/modules/qoder_account.rs`
+- `src-tauri/src/modules/trae_account.rs`
+- `src-tauri/src/modules/windsurf_account.rs`
+- `src-tauri/src/modules/workbuddy_account.rs`
+- `src-tauri/src/modules/zed_account.rs`
 - `src/pages/CodexAccountsPage.tsx`
 - `src/stores/useCodexAccountStore.ts`
 
@@ -90,6 +102,42 @@ Symbols and strings to watch:
 - `quota_error`
 - `error sending request`
 - `API 返回错误`
+
+### Account batch deletion performance
+
+Watched files:
+
+- `src-tauri/src/modules/codebuddy_account.rs`
+- `src-tauri/src/modules/codebuddy_cn_account.rs`
+- `src-tauri/src/modules/codex_account.rs`
+- `src-tauri/src/modules/cursor_account.rs`
+- `src-tauri/src/modules/gemini_account.rs`
+- `src-tauri/src/modules/github_copilot_account.rs`
+- `src-tauri/src/modules/kiro_account.rs`
+- `src-tauri/src/modules/qoder_account.rs`
+- `src-tauri/src/modules/trae_account.rs`
+- `src-tauri/src/modules/windsurf_account.rs`
+- `src-tauri/src/modules/workbuddy_account.rs`
+- `src-tauri/src/modules/zed_account.rs`
+
+Behavior to preserve:
+
+- Account deletion should use one shared batch path per provider.
+- Single-account deletion should wrap the id and delegate to batch deletion.
+- Batch deletion should normalize and deduplicate account ids before touching storage.
+- Batch deletion should update the account index once, then delete account detail files.
+- Codex batch deletion should clear `current_account_id` when the current account is removed.
+- Codex batch deletion should scan remaining accounts once to clear API Key accounts bound to removed OAuth accounts.
+- Avoid reintroducing per-account index read/write loops in provider `remove_accounts` implementations.
+
+Symbols and strings to watch:
+
+- `remove_account`
+- `remove_accounts`
+- `target_ids`
+- `HashSet<String>`
+- `bound_oauth_account_id`
+- `current_account_id`
 
 ### Tauri dependency alignment
 
