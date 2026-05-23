@@ -4,7 +4,7 @@ use base64::Engine;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -539,20 +539,31 @@ pub fn upsert_account(payload: GeminiOAuthCompletePayload) -> Result<GeminiAccou
 }
 
 pub fn remove_account(account_id: &str) -> Result<(), String> {
+    let targets = vec![account_id.to_string()];
+    remove_accounts(&targets)
+}
+
+pub fn remove_accounts(account_ids: &[String]) -> Result<(), String> {
+    let target_ids: HashSet<String> = account_ids
+        .iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if target_ids.is_empty() {
+        return Ok(());
+    }
+
     let _lock = GEMINI_ACCOUNT_INDEX_LOCK
         .lock()
         .map_err(|_| "获取 Gemini 账号锁失败".to_string())?;
     let mut index = load_account_index();
-    index.accounts.retain(|item| item.id != account_id);
+    index.accounts.retain(|item| !target_ids.contains(&item.id));
     save_account_index(&index)?;
-    delete_account_file(account_id)?;
-    Ok(())
-}
 
-pub fn remove_accounts(account_ids: &[String]) -> Result<(), String> {
-    for account_id in account_ids {
-        remove_account(account_id)?;
+    for account_id in target_ids {
+        delete_account_file(&account_id)?;
     }
+
     Ok(())
 }
 

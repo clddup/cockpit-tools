@@ -2291,39 +2291,61 @@ pub fn update_account_plan_type_in_index(
 
 /// 删除账号
 pub fn remove_account(account_id: &str) -> Result<(), String> {
-    let mut index = load_account_index();
-
-    // 从索引中移除
-    index.accounts.retain(|a| a.id != account_id);
-
-    // 如果删除的是当前账号，清除 current_account_id
-    if index.current_account_id.as_deref() == Some(account_id) {
-        index.current_account_id = None;
-    }
-
-    save_account_index(&index)?;
-    delete_account_file(account_id)?;
-
-    for mut account in list_accounts() {
-        if account.bound_oauth_account_id.as_deref() == Some(account_id) {
-            account.bound_oauth_account_id = None;
-            if let Err(err) = save_account(&account) {
-                logger::log_warn(&format!(
-                    "清理 Codex API Key 账号 OAuth 绑定失败: api_account_id={}, removed_oauth_account_id={}, error={}",
-                    account.id, account_id, err
-                ));
-            }
-        }
-    }
-
-    Ok(())
+    let targets = vec![account_id.to_string()];
+    remove_accounts(&targets)
 }
 
 /// 批量删除账号
 pub fn remove_accounts(account_ids: &[String]) -> Result<(), String> {
-    for id in account_ids {
-        remove_account(id)?;
+    let target_ids: HashSet<String> = account_ids
+        .iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if target_ids.is_empty() {
+        return Ok(());
     }
+
+    let mut index = load_account_index();
+
+    index.accounts.retain(|account| !target_ids.contains(&account.id));
+
+    if index
+        .current_account_id
+        .as_ref()
+        .map(|id| target_ids.contains(id))
+        .unwrap_or(false)
+    {
+        index.current_account_id = None;
+    }
+
+    save_account_index(&index)?;
+
+    for account_id in &target_ids {
+        delete_account_file(account_id)?;
+    }
+
+    for summary in &index.accounts {
+        let Some(mut account) = load_account(&summary.id) else {
+            continue;
+        };
+        let Some(bound_id) = account.bound_oauth_account_id.as_deref() else {
+            continue;
+        };
+        if !target_ids.contains(bound_id) {
+            continue;
+        }
+
+        let removed_oauth_account_id = bound_id.to_string();
+        account.bound_oauth_account_id = None;
+        if let Err(err) = save_account(&account) {
+            logger::log_warn(&format!(
+                "清理 Codex API Key 账号 OAuth 绑定失败: api_account_id={}, removed_oauth_account_id={}, error={}",
+                account.id, removed_oauth_account_id, err
+            ));
+        }
+    }
+
     Ok(())
 }
 
