@@ -85,19 +85,19 @@ allowed-tools:
    - `LATEST_UPSTREAM_TAG`
    - `LATEST_UPSTREAM_TAG_COMMIT`
 
-8. 验证最新 release tag commit 在 `upstream/main` 历史中：
+8. 只 fetch 最新 release tag 对应对象，不批量导入所有上游 tags：
+
+   ```bash
+   git fetch upstream tag LATEST_UPSTREAM_TAG
+   ```
+
+9. 验证最新 release tag commit 在 `upstream/main` 历史中。必须在 fetch tag 后验证，避免本地没有 tag 对象时误判：
 
    ```bash
    git merge-base --is-ancestor LATEST_UPSTREAM_TAG_COMMIT upstream/main
    ```
 
    如果不是 ancestor，停止并报告异常，不要合并。
-
-9. 只 fetch 最新 release tag 对应对象，不批量导入所有上游 tags：
-
-   ```bash
-   git fetch upstream tag LATEST_UPSTREAM_TAG
-   ```
 
 10. 记录当前提交：
 
@@ -137,11 +137,40 @@ allowed-tools:
 
     如果交集非空，即使 Git 没冲突，也必须标记为“需要重点检查”。
 
-14. 最后报告：
+14. 如果 watched files 交集非空，必须立即对这些文件做重点检查，不要等用户再次提醒：
+
+    ```bash
+    git diff PRE_MERGE_HEAD..HEAD -- WATCHED_FILE_1 WATCHED_FILE_2 ...
+    ```
+
+    检查重点必须覆盖 `.claude/LOCAL_CHANGES.md` 中对应行为区域，至少包括：
+
+    - Codex JSON/token 批量导入不能因单项失败导致整批失败
+    - `codex:json-import-progress` 进度事件与前端 `current/total` 展示
+    - Codex profile hydration 的并发限制、buffer、flush 行为
+    - Codex 异常筛选拆分：`AUTH_ERROR`、`QUOTA_ERROR`、`REFRESH_FAILED`
+    - `requires_reauth`、`quota_error`、`error sending request`、`API 返回错误` 的分类语义
+    - 各 provider `remove_accounts` 批量删除路径，避免恢复逐账号 index read/write 循环
+    - Codex 删除 `current_account_id` 与 API Key 绑定 OAuth 清理逻辑
+    - `@tauri-apps/api`、`Cargo.lock`、`pnpm-lock.yaml` 与 Tauri 版本对齐
+
+    若出现以下文件，必须在最终报告中列为“已重点检查 / 仍需人工复核”之一：
+
+    - `Cargo.lock`
+    - `package.json`
+    - `pnpm-lock.yaml`
+    - `src-tauri/src/commands/codex.rs`
+    - `src-tauri/src/modules/codex_account.rs`
+    - `src-tauri/src/modules/trae_account.rs`
+    - `src/pages/CodexAccountsPage.tsx`
+    - `src/stores/useCodexAccountStore.ts`
+
+15. 最后报告：
 
     - `upstream/main` 是否 fetch 成功
     - 最新上游 release tag 是哪个
     - `develop/clddup` 合并到哪个 tag commit
     - 是否出现冲突
     - 是否触碰 `.claude/LOCAL_CHANGES.md` 中的 watched files
+    - watched files 交集非空时，重点检查结论是什么，哪些文件仍需人工复核
     - 是否未 push，以及如需打包应由用户确认后 push 自己的 `*-clddup.*` tag
