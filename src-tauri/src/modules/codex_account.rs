@@ -3970,6 +3970,24 @@ enum CodexJsonImportCandidate {
     },
 }
 
+struct PendingCodexJsonImportCandidate {
+    position: usize,
+    label: String,
+    candidate: CodexJsonImportCandidate,
+}
+
+enum PreparedCodexJsonImportCandidate {
+    FullToken {
+        tokens: CodexTokens,
+        account_id_hint: Option<String>,
+        account_note: Option<String>,
+    },
+    AccessToken {
+        access_token: String,
+        account_note: Option<String>,
+    },
+}
+
 fn extract_account_note_from_value(value: &serde_json::Value) -> Option<String> {
     let obj = value.as_object()?;
     [
@@ -4303,6 +4321,356 @@ async fn import_codex_candidate(
     }
 }
 
+async fn prepare_codex_import_candidate(
+    pending: PendingCodexJsonImportCandidate,
+) -> (usize, String, Result<PreparedCodexJsonImportCandidate, String>) {
+    let result = match pending.candidate {
+        CodexJsonImportCandidate::FullToken {
+            tokens,
+            account_id_hint,
+            account_note,
+        } => Ok(PreparedCodexJsonImportCandidate::FullToken {
+            tokens,
+            account_id_hint,
+            account_note,
+        }),
+        CodexJsonImportCandidate::AccessToken {
+            access_token,
+            account_note,
+        } => Ok(PreparedCodexJsonImportCandidate::AccessToken {
+            access_token,
+            account_note,
+        }),
+        CodexJsonImportCandidate::RefreshToken {
+            refresh_token,
+            account_note,
+        } => codex_oauth::refresh_access_token(&refresh_token)
+            .await
+            .map(|tokens| PreparedCodexJsonImportCandidate::FullToken {
+                tokens,
+                account_id_hint: None,
+                account_note,
+            }),
+    };
+
+    (pending.position, pending.label, result)
+}
+
+fn upsert_full_token_account_in_index(
+    index: &mut CodexAccountIndex,
+    mut tokens: CodexTokens,
+    account_id_hint: Option<String>,
+    organization_id_hint: Option<String>,
+    account_note: Option<String>,
+) -> Result<CodexAccount, String> {
+    let (
+        email,
+        user_id,
+        plan_type,
+        subscription_active_until,
+        id_token_account_id,
+        id_token_org_id,
+    ) = extract_user_info(&tokens.id_token)?;
+    let account_id = normalize_optional_value(
+        extract_chatgpt_account_id_from_access_token(&tokens.access_token)
+            .or(id_token_account_id)
+            .or(account_id_hint),
+    );
+    let organization_id = normalize_optional_value(
+        extract_chatgpt_organization_id_from_access_token(&tokens.access_token)
+            .or(id_token_org_id)
+            .or(organization_id_hint),
+    );
+    let generated_id =
+        build_account_storage_id(&email, account_id.as_deref(), organization_id.as_deref());
+    let existing_id = find_existing_account_id(
+        index,
+        &email,
+        account_id.as_deref(),
+        organization_id.as_deref(),
+    )
+    .unwrap_or_else(|| generated_id.clone());
+    let existing = index.accounts.iter().position(|item| item.id == existing_id);
+
+    let mut account = if let Some(pos) = existing {
+        let existing_id = index.accounts[pos].id.clone();
+        let mut acc = load_account(&existing_id)
+            .unwrap_or_else(|| CodexAccount::new(existing_id, email.clone(), tokens.clone()));
+        tokens = retain_existing_refresh_token_if_missing(tokens, Some(&acc));
+        acc.tokens = tokens;
+        mark_token_chain_updated(&mut acc);
+        acc.auth_mode = CodexAuthMode::OAuth;
+        acc.openai_api_key = None;
+        acc.api_base_url = None;
+        acc.api_provider_mode = CodexApiProviderMode::OpenaiBuiltin;
+        acc.api_provider_id = None;
+        acc.api_provider_name = None;
+        acc.bound_oauth_account_id = None;
+        acc.user_id = user_id;
+        acc.plan_type = plan_type.clone();
+        acc.subscription_active_until = subscription_active_until.clone();
+        acc.account_id = account_id.clone();
+        acc.organization_id = organization_id.clone();
+        acc.update_last_used();
+        acc
+    } else {
+        tokens = retain_existing_refresh_token_if_missing(tokens, None);
+        let mut acc = CodexAccount::new(existing_id.clone(), email.clone(), tokens);
+        mark_token_chain_updated(&mut acc);
+        acc.auth_mode = CodexAuthMode::OAuth;
+        acc.openai_api_key = None;
+        acc.api_base_url = None;
+        acc.api_provider_mode = CodexApiProviderMode::OpenaiBuiltin;
+        acc.api_provider_id = None;
+        acc.api_provider_name = None;
+        acc.bound_oauth_account_id = None;
+        acc.user_id = user_id;
+        acc.plan_type = plan_type.clone();
+        acc.subscription_active_until = subscription_active_until.clone();
+        acc.account_id = account_id.clone();
+        acc.organization_id = organization_id.clone();
+        index.accounts.retain(|item| item.id != existing_id);
+        acc
+    };
+
+    if account_note.is_some() {
+        account.account_note = account_note;
+    }
+
+    save_account(&account)?;
+
+    if let Some(summary) = index.accounts.iter_mut().find(|item| item.id == account.id) {
+        summary.email = account.email.clone();
+        summary.plan_type = account.plan_type.clone();
+        summary.subscription_active_until = account.subscription_active_until.clone();
+        summary.last_used = account.last_used;
+    } else {
+        index.accounts.push(CodexAccountSummary {
+            id: account.id.clone(),
+            email: account.email.clone(),
+            plan_type: account.plan_type.clone(),
+            subscription_active_until: account.subscription_active_until.clone(),
+            created_at: account.created_at,
+            last_used: account.last_used,
+        });
+    }
+
+    logger::log_info(&format!(
+        "Codex 账号已准备保存: email={}, account_id={:?}, organization_id={:?}",
+        email, account_id, organization_id
+    ));
+
+    Ok(account)
+}
+
+fn upsert_access_token_account_in_index(
+    index: &mut CodexAccountIndex,
+    access_token: String,
+    account_note: Option<String>,
+) -> Result<CodexAccount, String> {
+    let access_token =
+        normalize_optional_value(Some(access_token)).ok_or("accessToken 不能为空")?;
+    let (email, user_id, plan_type, subscription_active_until, account_id, organization_id) =
+        extract_access_token_identity(&access_token);
+    let email = email
+        .or_else(|| account_id.as_ref().map(|value| format!("codex-{}", value)))
+        .or_else(|| user_id.as_ref().map(|value| format!("codex-{}", value)))
+        .unwrap_or_else(|| format!("codex-access-{}", access_token_fingerprint(&access_token)));
+    let mut tokens = CodexTokens {
+        id_token: String::new(),
+        access_token,
+        refresh_token: None,
+    };
+    let generated_id =
+        build_account_storage_id(&email, account_id.as_deref(), organization_id.as_deref());
+    let existing_id = find_existing_account_id(
+        index,
+        &email,
+        account_id.as_deref(),
+        organization_id.as_deref(),
+    )
+    .unwrap_or_else(|| generated_id.clone());
+    let existing = index.accounts.iter().position(|item| item.id == existing_id);
+
+    let mut account = if let Some(pos) = existing {
+        let existing_id = index.accounts[pos].id.clone();
+        let mut acc = load_account(&existing_id)
+            .unwrap_or_else(|| CodexAccount::new(existing_id, email.clone(), tokens.clone()));
+        tokens = retain_existing_refresh_token_if_missing(tokens, Some(&acc));
+        acc.tokens = tokens;
+        mark_token_chain_updated(&mut acc);
+        acc.auth_mode = CodexAuthMode::OAuth;
+        acc.openai_api_key = None;
+        acc.api_base_url = None;
+        acc.api_provider_mode = CodexApiProviderMode::OpenaiBuiltin;
+        acc.api_provider_id = None;
+        acc.api_provider_name = None;
+        acc.bound_oauth_account_id = None;
+        acc.user_id = user_id;
+        acc.plan_type = plan_type.clone();
+        acc.subscription_active_until = subscription_active_until.clone();
+        acc.account_id = account_id.clone();
+        acc.organization_id = organization_id.clone();
+        acc.update_last_used();
+        acc
+    } else {
+        tokens = retain_existing_refresh_token_if_missing(tokens, None);
+        let mut acc = CodexAccount::new(existing_id.clone(), email.clone(), tokens);
+        mark_token_chain_updated(&mut acc);
+        acc.auth_mode = CodexAuthMode::OAuth;
+        acc.openai_api_key = None;
+        acc.api_base_url = None;
+        acc.api_provider_mode = CodexApiProviderMode::OpenaiBuiltin;
+        acc.api_provider_id = None;
+        acc.api_provider_name = None;
+        acc.bound_oauth_account_id = None;
+        acc.user_id = user_id;
+        acc.plan_type = plan_type.clone();
+        acc.subscription_active_until = subscription_active_until.clone();
+        acc.account_id = account_id.clone();
+        acc.organization_id = organization_id.clone();
+        index.accounts.retain(|item| item.id != existing_id);
+        acc
+    };
+
+    if account_note.is_some() {
+        account.account_note = account_note;
+    }
+
+    save_account(&account)?;
+
+    if let Some(summary) = index.accounts.iter_mut().find(|item| item.id == account.id) {
+        summary.email = account.email.clone();
+        summary.plan_type = account.plan_type.clone();
+        summary.subscription_active_until = account.subscription_active_until.clone();
+        summary.last_used = account.last_used;
+    } else {
+        index.accounts.push(CodexAccountSummary {
+            id: account.id.clone(),
+            email: account.email.clone(),
+            plan_type: account.plan_type.clone(),
+            subscription_active_until: account.subscription_active_until.clone(),
+            created_at: account.created_at,
+            last_used: account.last_used,
+        });
+    }
+
+    logger::log_info(&format!(
+        "Codex accessToken 账号已准备保存: email={}, account_id={:?}, organization_id={:?}",
+        email, account_id, organization_id
+    ));
+
+    Ok(account)
+}
+
+fn import_prepared_codex_candidates_batch(
+    candidates: Vec<PreparedCodexJsonImportCandidate>,
+) -> Result<Vec<CodexAccount>, String> {
+    let mut index = load_account_index();
+    let mut accounts = Vec::with_capacity(candidates.len());
+
+    for candidate in candidates {
+        let account = match candidate {
+            PreparedCodexJsonImportCandidate::FullToken {
+                tokens,
+                account_id_hint,
+                account_note,
+            } => upsert_full_token_account_in_index(
+                &mut index,
+                tokens,
+                account_id_hint,
+                None,
+                account_note,
+            )?,
+            PreparedCodexJsonImportCandidate::AccessToken {
+                access_token,
+                account_note,
+            } => upsert_access_token_account_in_index(&mut index, access_token, account_note)?,
+        };
+        accounts.push(account);
+    }
+
+    save_account_index(&index)?;
+    Ok(accounts)
+}
+
+async fn import_codex_candidates_concurrently(
+    pending: Vec<PendingCodexJsonImportCandidate>,
+    progress_total: usize,
+    progress_label: Option<&str>,
+) -> Result<Vec<CodexAccount>, String> {
+    use futures::future::join_all;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    const MAX_IMPORT_PREPARE_CONCURRENT: usize = 5;
+
+    if pending.is_empty() {
+        return Err("未导入任何 Codex 账号".to_string());
+    }
+
+    let semaphore = Arc::new(Semaphore::new(MAX_IMPORT_PREPARE_CONCURRENT));
+    let tasks: Vec<_> = pending
+        .into_iter()
+        .map(|candidate| {
+            let semaphore = semaphore.clone();
+            async move {
+                let _permit = match semaphore.acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(error) => {
+                        return (
+                            candidate.position,
+                            candidate.label,
+                            Err(format!("获取 Codex 导入并发许可失败: {}", error)),
+                        );
+                    }
+                };
+                prepare_codex_import_candidate(candidate).await
+            }
+        })
+        .collect();
+
+    let mut prepared = join_all(tasks).await;
+    prepared.sort_by_key(|(position, _, _)| *position);
+
+    let mut accounts = Vec::with_capacity(prepared.len());
+    let mut failures = Vec::new();
+
+    let mut prepared_candidates = Vec::new();
+
+    for (index, (position, label, result)) in prepared.into_iter().enumerate() {
+        emit_json_import_progress(index + 1, progress_total, progress_label);
+        match result {
+            Ok(candidate) => prepared_candidates.push(candidate),
+            Err(error) => {
+                let message = format!("第 {} 个 token 导入失败: {}", label, error);
+                logger::log_warn(&format!("Codex 批量 token 导入跳过失败项: {}", message));
+                failures.push(message);
+            }
+        }
+
+        let _ = position;
+    }
+
+    match import_prepared_codex_candidates_batch(prepared_candidates) {
+        Ok(imported) => accounts.extend(imported),
+        Err(error) => {
+            logger::log_warn(&format!("Codex 批量 token 导入落盘失败: {}", error));
+            failures.push(error);
+        }
+    }
+
+    if accounts.is_empty() {
+        return Err(if failures.is_empty() {
+            "未导入任何 Codex 账号".to_string()
+        } else {
+            failures.join("; ")
+        });
+    }
+
+    Ok(accounts)
+}
+
 fn emit_json_import_progress(current: usize, total: usize, label: Option<&str>) {
     if let Some(app_handle) = crate::get_app_handle() {
         use tauri::Emitter;
@@ -4328,11 +4696,11 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
     }
 
     let total = lines.len();
-    let mut accounts = Vec::with_capacity(total);
+    let mut pending = Vec::new();
     let mut failures = Vec::new();
+    let mut position = 0usize;
 
     for (index, line) in lines.into_iter().enumerate() {
-        emit_json_import_progress(index + 1, total, None);
         let values = match serde_json::from_str::<serde_json::Value>(&line) {
             Ok(serde_json::Value::Array(items)) => items,
             Ok(value) => vec![value],
@@ -4352,19 +4720,16 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
                     continue;
                 }
             };
-
-            match import_codex_candidate(candidate).await {
-                Ok(account) => accounts.push(account),
-                Err(error) => {
-                    let message = format!("第 {} 个 token 导入失败: {}", index + 1, error);
-                    logger::log_warn(&format!("Codex 批量 token 导入跳过失败项: {}", message));
-                    failures.push(message);
-                }
-            }
+            position += 1;
+            pending.push(PendingCodexJsonImportCandidate {
+                position,
+                label: (index + 1).to_string(),
+                candidate,
+            });
         }
     }
 
-    if accounts.is_empty() {
+    if pending.is_empty() {
         return Err(if failures.is_empty() {
             "未导入任何 Codex 账号".to_string()
         } else {
@@ -4372,7 +4737,7 @@ async fn import_accounts_from_token_lines(content: &str) -> Result<Vec<CodexAcco
         });
     }
 
-    Ok(accounts)
+    import_codex_candidates_concurrently(pending, total, None).await
 }
 
 fn is_sub2api_codex_oauth_account(value: &serde_json::Value) -> bool {
@@ -4409,7 +4774,7 @@ async fn import_sub2api_export_from_value(
         .get("accounts")
         .and_then(|item| item.as_array())
         .ok_or("Sub2API JSON 缺少 accounts 数组")?;
-    let mut imported = Vec::new();
+    let mut pending = Vec::new();
 
     for (index, item) in accounts.iter().enumerate() {
         if !is_sub2api_codex_oauth_account(item) {
@@ -4421,14 +4786,20 @@ async fn import_sub2api_export_from_value(
                 index + 1
             )
         })?;
-        imported.push(import_codex_candidate(candidate).await?);
+        pending.push(PendingCodexJsonImportCandidate {
+            position: index + 1,
+            label: (index + 1).to_string(),
+            candidate,
+        });
     }
 
-    if imported.is_empty() {
+    if pending.is_empty() {
         return Err("Sub2API JSON 中未找到可导入的 OpenAI OAuth access_token".to_string());
     }
 
-    Ok(Some(imported))
+    Ok(Some(
+        import_codex_candidates_concurrently(pending, accounts.len(), None).await?,
+    ))
 }
 
 async fn import_account_from_json_value(
@@ -4606,9 +4977,19 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
             serde_json::Value::Array(items) => {
                 let mut result = Vec::new();
                 let mut failures = Vec::new();
+                let mut pending = Vec::new();
                 let total = items.len();
 
                 for (index, item) in items.into_iter().enumerate() {
+                    if let Some(candidate) = extract_codex_import_candidate_from_value(&item) {
+                        pending.push(PendingCodexJsonImportCandidate {
+                            position: index + 1,
+                            label: (index + 1).to_string(),
+                            candidate,
+                        });
+                        continue;
+                    }
+
                     emit_json_import_progress(index + 1, total, None);
                     match import_account_from_json_value(item).await {
                         Ok(Some(account)) => result.push(account),
@@ -4627,6 +5008,13 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
                     }
                 }
 
+                if !pending.is_empty() {
+                    match import_codex_candidates_concurrently(pending, total, None).await {
+                        Ok(accounts) => result.extend(accounts),
+                        Err(error) => failures.push(error),
+                    }
+                }
+
                 if !result.is_empty() {
                     return Ok(result);
                 }
@@ -4641,30 +5029,34 @@ pub async fn import_from_json(json_content: &str) -> Result<Vec<CodexAccount>, S
 
     if let Some(items) = parse_line_delimited_json_values(json_content)? {
         let total_items = items.len();
-        let mut result = Vec::new();
+        let mut pending = Vec::new();
+        let mut failures = Vec::new();
 
         for (index, item) in items.into_iter().enumerate() {
-            emit_json_import_progress(index + 1, total_items, None);
-            match import_account_from_json_value(item).await {
-                Ok(Some(account)) => result.push(account),
-                Ok(None) => {
-                    return Err(format!(
-                        "第 {} 行未找到有效的 Codex Token（需要 session JSON、accessToken/access_token、id_token + access_token，或 refresh_token）",
-                        index + 1
-                    ));
-                }
-                Err(error) => {
-                    let message = format!("第 {} 行导入失败: {}", index + 1, error);
-                    logger::log_warn(&format!("Codex 逐行 JSON 导入跳过失败项: {}", message));
-                    if result.is_empty() && index + 1 == total_items {
-                        return Err(message);
-                    }
-                }
+            let Some(candidate) = extract_codex_import_candidate_from_value(&item) else {
+                return Err(format!(
+                    "第 {} 行未找到有效的 Codex Token（需要 session JSON、accessToken/access_token、id_token + access_token，或 refresh_token）",
+                    index + 1
+                ));
+            };
+            pending.push(PendingCodexJsonImportCandidate {
+                position: index + 1,
+                label: (index + 1).to_string(),
+                candidate,
+            });
+        }
+
+        match import_codex_candidates_concurrently(pending, total_items, None).await {
+            Ok(result) if !result.is_empty() => return Ok(result),
+            Ok(_) => {}
+            Err(error) => {
+                logger::log_warn(&format!("Codex 逐行 JSON 导入跳过失败项: {}", error));
+                failures.push(error);
             }
         }
 
-        if !result.is_empty() {
-            return Ok(result);
+        if !failures.is_empty() {
+            return Err(failures.join("; "));
         }
     }
 

@@ -63,6 +63,7 @@ Behavior to preserve:
 - Import progress is emitted through `codex:json-import-progress`.
 - Frontend import UI shows `current/total` progress.
 - Refresh phase shows quota refresh progress.
+- Imported Codex OAuth accounts are prepared with bounded concurrency and then persisted through a single indexed batch path.
 - Imported Codex OAuth accounts refresh quotas with bounded concurrency instead of one-by-one serial refresh.
 - API Key accounts are preserved without quota refresh during the import refresh phase.
 - Imported account order is preserved after concurrent refresh.
