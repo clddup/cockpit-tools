@@ -19,6 +19,7 @@ These commits describe the current local customization set relative to `origin/m
 - `eff496d fix: 修复构建错误 - 对齐 tauri 版本并修复变量名`
 - `79b8b6a feat: 优化导入性能、添加导入进度显示、拆分异常筛选`
 - `bdb9d75 optimize account batch deletion`
+- Codex import quota refresh concurrency optimization in `src-tauri/src/commands/codex.rs`
 
 ## Watched files
 
@@ -62,6 +63,9 @@ Behavior to preserve:
 - Import progress is emitted through `codex:json-import-progress`.
 - Frontend import UI shows `current/total` progress.
 - Refresh phase shows quota refresh progress.
+- Imported Codex OAuth accounts refresh quotas with bounded concurrency instead of one-by-one serial refresh.
+- API Key accounts are preserved without quota refresh during the import refresh phase.
+- Imported account order is preserved after concurrent refresh.
 - Codex profile hydration runs concurrently with a concurrency limit.
 - Codex profile hydrate updates are buffered and flushed in batches to reduce frequent state updates.
 

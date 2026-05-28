@@ -14,7 +14,7 @@ use crate::modules::{
     codex_speed, codex_wakeup, codex_wakeup_scheduler, config, logger, openclaw_auth,
     opencode_auth, process,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tauri::AppHandle;
 use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
@@ -425,52 +425,101 @@ async fn refresh_imported_codex_accounts(
     app: &AppHandle,
     accounts: Vec<CodexAccount>,
 ) -> Vec<CodexAccount> {
-    let mut result = Vec::with_capacity(accounts.len());
-    let mut success_count = 0;
-    let mut attempted = false;
+    use futures::future::join_all;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    const MAX_IMPORT_REFRESH_CONCURRENT: usize = 5;
+
     let total = accounts.len();
-
-    for (index, account) in accounts.into_iter().enumerate() {
-        if account.is_api_key_auth() {
-            result.push(account);
-            continue;
-        }
-
-        attempted = true;
-        {
-            use tauri::Emitter;
-            let _ = app.emit(
-                "codex:json-import-progress",
-                serde_json::json!({
-                    "current": index + 1,
-                    "total": total,
-                    "phase": "refresh",
-                }),
-            );
-        }
-        match codex_quota::refresh_account_quota(&account.id).await {
-            Ok(_) => {
-                success_count += 1;
+    let mut result_slots: Vec<Option<CodexAccount>> = vec![None; total];
+    let refresh_targets: Vec<(usize, CodexAccount)> = accounts
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, account)| {
+            if account.is_api_key_auth() {
+                result_slots[index] = Some(account);
+                None
+            } else {
+                Some((index, account))
             }
-            Err(error) => {
-                logger::log_warn(&format!(
-                    "Codex 导入后刷新配额失败: account_id={}, email={}, error={}",
-                    account.id, account.email, error
-                ));
-            }
-        }
+        })
+        .collect();
 
-        result.push(codex_account::load_account(&account.id).unwrap_or(account));
+    if refresh_targets.is_empty() {
+        if !result_slots.is_empty() {
+            let _ = crate::modules::tray::update_tray_menu(app);
+        }
+        return result_slots.into_iter().flatten().collect();
+    }
+
+    let completed = Arc::new(AtomicUsize::new(0));
+    let semaphore = Arc::new(Semaphore::new(MAX_IMPORT_REFRESH_CONCURRENT));
+    let app_handle = app.clone();
+
+    let tasks: Vec<_> = refresh_targets
+        .into_iter()
+        .map(|(index, account)| {
+            let semaphore = semaphore.clone();
+            let completed = completed.clone();
+            let app_handle = app_handle.clone();
+            async move {
+                let _permit = match semaphore.acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(error) => {
+                        logger::log_warn(&format!(
+                            "Codex 导入后刷新配额获取并发许可失败: account_id={}, email={}, error={}",
+                            account.id, account.email, error
+                        ));
+                        return (index, account, false);
+                    }
+                };
+
+                let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                let _ = app_handle.emit(
+                    "codex:json-import-progress",
+                    serde_json::json!({
+                        "current": current,
+                        "total": total,
+                        "phase": "refresh",
+                    }),
+                );
+
+                let refreshed = match codex_quota::refresh_account_quota(&account.id).await {
+                    Ok(_) => true,
+                    Err(error) => {
+                        logger::log_warn(&format!(
+                            "Codex 导入后刷新配额失败: account_id={}, email={}, error={}",
+                            account.id, account.email, error
+                        ));
+                        false
+                    }
+                };
+
+                let account_id = account.id.clone();
+                (
+                    index,
+                    codex_account::load_account(&account_id).unwrap_or(account),
+                    refreshed,
+                )
+            }
+        })
+        .collect();
+
+    let mut success_count = 0;
+    for (index, account, refreshed) in join_all(tasks).await {
+        if refreshed {
+            success_count += 1;
+        }
+        result_slots[index] = Some(account);
     }
 
     if success_count > 0 {
         run_codex_post_refresh_checks(app).await;
     }
-    if attempted || !result.is_empty() {
-        let _ = crate::modules::tray::update_tray_menu(app);
-    }
+    let _ = crate::modules::tray::update_tray_menu(app);
 
-    result
+    result_slots.into_iter().flatten().collect()
 }
 
 /// 从本地 auth.json 导入账号
