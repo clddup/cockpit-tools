@@ -83,7 +83,7 @@ allowed-tools:
    从输出中选择最新的上游 release tag。忽略包含 `clddup` 的 tag。记录：
 
    - `LATEST_UPSTREAM_TAG`
-   - `LATEST_UPSTREAM_TAG_COMMIT`
+   - `LATEST_UPSTREAM_TAG_REF`（`ls-remote` 输出的 hash，可能是 tag 对象或 commit）
 
 8. 只 fetch 最新 release tag 对应对象，不批量导入所有上游 tags：
 
@@ -91,15 +91,23 @@ allowed-tools:
    git fetch upstream tag LATEST_UPSTREAM_TAG
    ```
 
-9. 验证最新 release tag commit 在 `upstream/main` 历史中。必须在 fetch tag 后验证，避免本地没有 tag 对象时误判：
+9. 将 tag 解析为实际的 commit hash。对于 annotated tag，`ls-remote --refs` 返回的是 tag 对象 hash 而非 commit hash，必须用 `^{commit}` 解引用：
 
    ```bash
-   git merge-base --is-ancestor LATEST_UPSTREAM_TAG_COMMIT upstream/main
+   git rev-parse LATEST_UPSTREAM_TAG^{commit}
    ```
 
-   如果不是 ancestor，停止并报告异常，不要合并。
+   记为 `LATEST_UPSTREAM_TAG_COMMIT`。后续所有操作（验证、合并）都使用这个 commit hash，避免合并 tag 对象导致生成 `Merge tag 'xxx'` 信息。
 
-10. 记录当前提交：
+10. 验证最新 release tag commit 在 `upstream/main` 历史中。必须在 fetch tag 后验证，避免本地没有 tag 对象时误判：
+
+    ```bash
+    git merge-base --is-ancestor LATEST_UPSTREAM_TAG_COMMIT upstream/main
+    ```
+
+    如果不是 ancestor，停止并报告异常，不要合并。
+
+11. 记录当前提交：
 
     ```bash
     git rev-parse HEAD
@@ -107,7 +115,7 @@ allowed-tools:
 
     记为 `PRE_MERGE_HEAD`。
 
-11. 合并最新 release tag 对应 commit，而不是合并 `upstream/main` 最新提交：
+12. 合并最新 release tag 对应的 commit（不是 tag 对象本身），这样合并信息会是普通的 merge commit，不会出现 `Merge tag 'xxx'` 字样：
 
     ```bash
     git merge LATEST_UPSTREAM_TAG_COMMIT
@@ -122,14 +130,14 @@ allowed-tools:
 
     不要自动解决冲突。
 
-12. 合并成功后，列出本次上游引入的文件：
+13. 合并成功后，列出本次上游引入的文件：
 
     ```bash
     git diff --name-only PRE_MERGE_HEAD..HEAD
     git diff --stat PRE_MERGE_HEAD..HEAD
     ```
 
-13. 将上一步文件列表与 `.claude/LOCAL_CHANGES.md` 的 `Watched files` 做交集，明确报告：
+14. 将上一步文件列表与 `.claude/LOCAL_CHANGES.md` 的 `Watched files` 做交集，明确报告：
 
     - 是否触碰 watched files
     - 触碰了哪些 watched files
@@ -137,7 +145,7 @@ allowed-tools:
 
     如果交集非空，即使 Git 没冲突，也必须标记为“需要重点检查”。
 
-14. 如果 watched files 交集非空，必须立即对这些文件做重点检查，不要等用户再次提醒：
+15. 如果 watched files 交集非空，必须立即对这些文件做重点检查，不要等用户再次提醒：
 
     ```bash
     git diff PRE_MERGE_HEAD..HEAD -- WATCHED_FILE_1 WATCHED_FILE_2 ...
@@ -165,7 +173,7 @@ allowed-tools:
     - `src/pages/CodexAccountsPage.tsx`
     - `src/stores/useCodexAccountStore.ts`
 
-15. 最后报告：
+16. 最后报告：
 
     - `upstream/main` 是否 fetch 成功
     - 最新上游 release tag 是哪个
