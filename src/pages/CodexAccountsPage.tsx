@@ -4712,6 +4712,9 @@ export function CodexAccountsPage() {
       buildValidAccountsFilterOption(t, oauthBindingTierCounts.VALID),
     ],
     [t, oauthBindingTierCounts],
+  );
+
+  const oauthBindingAvailableTags = useMemo(() => {
     const tagSet = new Set<string>();
     oauthBindingEligibleAccounts.forEach((account) => {
       (account.tags || []).forEach((tag) => {
@@ -4761,8 +4764,11 @@ export function CodexAccountsPage() {
     }
 
     if (oauthBindingFilterTypes.length > 0) {
-      const { selectedTypes } =
+      const { requireValidAccounts, selectedTypes } =
         splitValidityFilterValues(oauthBindingFilterTypes);
+      if (requireValidAccounts) {
+        result = result.filter((account) => !isAbnormalAccount(account));
+      }
       if (selectedTypes.size > 0) {
         result = result.filter((account) => {
           if (selectedTypes.has("AUTH_ERROR") && account.requires_reauth) {
@@ -4819,6 +4825,7 @@ export function CodexAccountsPage() {
 
     return result;
   }, [
+    isAbnormalAccount,
     normalizeTag,
     oauthBindingEligibleAccounts,
     oauthBindingFilterTypes,
