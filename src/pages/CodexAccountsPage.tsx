@@ -4711,10 +4711,7 @@ export function CodexAccountsPage() {
       { value: "REFRESH_FAILED", label: `${t("codex.quotaError.refreshFailedBadge", "刷新失败")} (${oauthBindingTierCounts.REFRESH_FAILED})` },
       buildValidAccountsFilterOption(t, oauthBindingTierCounts.VALID),
     ],
-    [oauthBindingTierCounts, t],
-  );
-
-  const oauthBindingAvailableTags = useMemo(() => {
+    [t, oauthBindingTierCounts],
     const tagSet = new Set<string>();
     oauthBindingEligibleAccounts.forEach((account) => {
       (account.tags || []).forEach((tag) => {
@@ -4764,12 +4761,8 @@ export function CodexAccountsPage() {
     }
 
     if (oauthBindingFilterTypes.length > 0) {
-      const { requireValidAccounts, selectedTypes } = splitValidityFilterValues(
-        oauthBindingFilterTypes,
-      );
-      if (requireValidAccounts) {
-        result = result.filter((account) => !isAbnormalAccount(account));
-      }
+      const { selectedTypes } =
+        splitValidityFilterValues(oauthBindingFilterTypes);
       if (selectedTypes.size > 0) {
         result = result.filter((account) => {
           if (selectedTypes.has("AUTH_ERROR") && account.requires_reauth) {
@@ -4826,7 +4819,6 @@ export function CodexAccountsPage() {
 
     return result;
   }, [
-    isAbnormalAccount,
     normalizeTag,
     oauthBindingEligibleAccounts,
     oauthBindingFilterTypes,
@@ -9791,11 +9783,11 @@ export function CodexAccountsPage() {
                         {oauthBindingTargetKind === "local_access"
                           ? t(
                               "codex.localAccess.oauthBinding.desc",
-                              "可选绑定。只能选择带 refresh_token、可自动续期的 OAuth 账号；未绑定时 API 服务按原 API Key 逻辑运行；绑定后登录态使用 OAuth 账号，Provider 使用当前 API 服务配置。",
+                              "可选绑定。只要 OAuth 账号带 refresh_token 即可选择；未绑定时 API 服务按原 API Key 逻辑运行；绑定后登录态使用 OAuth 账号，Provider 使用当前 API 服务配置。",
                             )
                           : t(
                               "codex.api.oauthBinding.desc",
-                              "可选绑定。只能选择带 refresh_token、可自动续期的 OAuth 账号；未绑定时该账号按原 API Key 逻辑切换；绑定后登录态使用 OAuth 账号，Provider 使用当前 API Key 账号配置。",
+                              "可选绑定。只要 OAuth 账号带 refresh_token 即可选择；未绑定时该账号按原 API Key 逻辑切换；绑定后登录态使用 OAuth 账号，Provider 使用当前 API Key 账号配置。",
                             )}
                       </p>
                       <div className="section-desc codex-oauth-binding-current-target">

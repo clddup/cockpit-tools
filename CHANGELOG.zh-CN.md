@@ -7,6 +7,22 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ---
+## [0.24.11] - 2026-06-01
+
+### 新增
+- **Codex API 服务账号池现支持账号级禁用模型规则**：每个账号可配置禁用模型、批量应用规则，并让 Legacy、WebSocket 与 Sidecar 调度避开无法处理目标模型的账号。
+- **Codex 唤醒任务现改为官方直连对话**：唤醒会通过所选 OAuth 账号直接请求官方 Codex 对话，无需 Codex CLI 或本地 API 服务处于运行状态，并沿用已保存的上游代理和超时配置，解析官方流式响应后以官方直连结果展示。
+
+### 变更
+- **Codex API 服务账号池控件视觉更统一**：Codex API/Cockpit API 文案、调度选项、复选框、表单控件高度和字体排版现使用更协调的布局。
+- **Codex OAuth 绑定现允许任意带 `refresh_token` 的 OAuth 账号**：绑定筛选不再要求账号命中正常账号快捷过滤，绑定说明也与实际可选规则一致。
+- **Codex 启动在切换启动凭据时会先修复会话可见性**：默认实例与受管实例在涉及启动凭据切换时，会先执行会话可见性修复再启动。
+
+### 修复
+- **Codex config.toml 受管写入会保留更多用户配置**：API 账号切换不再重建整个模型供应商表，API 服务接管恢复会保留当前插件设置，并在写入当前配置时自动压缩连续空行。
+- **Windows Antigravity 本地账号导入现读取当前系统凭据路径**：本地导入会使用 Windows Credential Manager 中的 `gemini:antigravity` 凭据，并复用 refresh-token 导入流程；非 Windows 平台继续使用 state 数据库路径。
+
+---
 ## [0.24.10] - 2026-05-31
 
 ### 新增
