@@ -8,6 +8,7 @@ This file records fork-specific behavior maintained on `develop/clddup` so upstr
 - Upstream baseline: latest upstream release tag commit on `main`
 - Main branch policy: keep `main` aligned with latest upstream `main`
 - Development branch sync policy: merge the latest upstream release tag commit into `develop/clddup`, not commits after that tag on `upstream/main`
+- Upstream sync merge commits should use a custom message such as `sync upstream release v0.24.13`, not Git's default `Merge commit '...' into develop/clddup` message
 - Upstream remote URL: `https://github.com/jlcodes99/cockpit-tools.git`
 - Fork release tag policy: use user-owned tags such as `v0.24.3-clddup.1`; do not push upstream's original tag names to `origin`
 

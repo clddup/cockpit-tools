@@ -115,10 +115,10 @@ allowed-tools:
 
     记为 `PRE_MERGE_HEAD`。
 
-12. 合并最新 release tag 对应的 commit（不是 tag 对象本身），这样合并信息会是普通的 merge commit，不会出现 `Merge tag 'xxx'` 字样：
+12. 合并最新 release tag 对应的 commit（不是 tag 对象本身），并使用固定自定义 merge message，避免出现默认的 `Merge commit '...' into develop/clddup` 信息：
 
     ```bash
-    git merge LATEST_UPSTREAM_TAG_COMMIT
+    git merge -m "sync upstream release LATEST_UPSTREAM_TAG" LATEST_UPSTREAM_TAG_COMMIT
     ```
 
     如果冲突，立即停止并报告：
