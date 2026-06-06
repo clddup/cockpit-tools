@@ -1,4 +1,4 @@
-use crate::models::codex::{CodexAccount, CodexApiProviderMode};
+use crate::models::codex::{CodexAccount, CodexApiProviderMode, CodexAuthMode};
 use crate::models::codex_local_access::{
     CodexLocalAccessAccountCooldown, CodexLocalAccessAccountHealth,
     CodexLocalAccessAccountModelRule, CodexLocalAccessAccountStats, CodexLocalAccessApiKey,
@@ -8,6 +8,7 @@ use crate::models::codex_local_access::{
     CodexLocalAccessImageGenerationMode, CodexLocalAccessImageGenerationStatus,
     CodexLocalAccessModelAlias, CodexLocalAccessModelPricing, CodexLocalAccessModelStats,
     CodexLocalAccessPortCleanupResult, CodexLocalAccessProfileAttachment,
+    CodexLocalAccessProviderGateway, CodexLocalAccessProviderGatewayModelCapability,
     CodexLocalAccessRequestKind, CodexLocalAccessRoutingStrategy, CodexLocalAccessScope,
     CodexLocalAccessState, CodexLocalAccessStats, CodexLocalAccessStatsWindow,
     CodexLocalAccessTestFailure, CodexLocalAccessTestResult, CodexLocalAccessTimeoutPreset,
@@ -29,6 +30,7 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha1::{Digest, Sha1};
+use sha2::Sha256;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
@@ -53,7 +55,7 @@ use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{client_async_tls_with_config, MaybeTlsStream, WebSocketStream};
-use toml_edit::Document;
+use toml_edit::{value, Document};
 
 const CODEX_LOCAL_ACCESS_FILE: &str = "codex_local_access.json";
 const CODEX_LOCAL_ACCESS_CHAT_TEST_STREAM_EVENT: &str = "codex-local-access-chat-test-stream";
@@ -74,6 +76,8 @@ const CODEX_LOCAL_ACCESS_TAKEOVER_BACKUP_VERSION: u32 = 1;
 const CODEX_LOCAL_ACCESS_RUNTIME_PROVIDER_ID: &str = "codex_local_access";
 const CODEX_PROFILE_AUTH_FILE: &str = "auth.json";
 const CODEX_PROFILE_CONFIG_FILE: &str = "config.toml";
+const CODEX_PROVIDER_MODEL_CATALOG_FILE: &str = "cockpit-provider-model-catalog.json";
+const CODEX_PROVIDER_MODEL_BACKUP_FILE: &str = ".cockpit-provider-model-backup.json";
 const MAX_HTTP_REQUEST_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_REQUEST_RETRY_ATTEMPTS: usize = 1;
@@ -369,6 +373,8 @@ struct ProxyDispatchError {
 struct ResolvedLocalApiKey {
     id: String,
     label: String,
+    provider_gateway: Option<CodexLocalAccessProviderGateway>,
+    account_ids: Vec<String>,
     model_prefix: Option<String>,
     allowed_models: Vec<String>,
     excluded_models: Vec<String>,
@@ -698,10 +704,42 @@ fn prune_prepared_account_cache(runtime: &mut GatewayRuntime, now: i64) {
     });
 }
 
+fn prune_runtime_account_state(runtime: &mut GatewayRuntime) {
+    let Some(collection) = runtime.collection.as_ref() else {
+        runtime.prepared_accounts.clear();
+        runtime.account_health.clear();
+        runtime.model_cooldowns.clear();
+        runtime.response_affinity.clear();
+        return;
+    };
+
+    let allowed_account_ids = collection
+        .account_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    runtime
+        .prepared_accounts
+        .retain(|account_id, _| allowed_account_ids.contains(account_id.as_str()));
+    runtime
+        .account_health
+        .retain(|account_id, _| allowed_account_ids.contains(account_id.as_str()));
+    runtime
+        .response_affinity
+        .retain(|_, binding| allowed_account_ids.contains(binding.account_id.as_str()));
+    runtime.model_cooldowns.retain(|key, _| {
+        key.split_once(COOLDOWN_KEY_SEPARATOR)
+            .map(|(account_id, _)| allowed_account_ids.contains(account_id))
+            .unwrap_or(false)
+    });
+}
+
 fn sync_runtime_collection(runtime: &mut GatewayRuntime, collection: CodexLocalAccessCollection) {
     runtime.collection = Some(collection);
     runtime.loaded = true;
     runtime.last_error = None;
+    prune_runtime_account_state(runtime);
     prune_prepared_account_cache(runtime, now_ms());
 }
 
@@ -1105,6 +1143,16 @@ fn normalize_model_rule_list(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+fn normalize_account_id_list(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
 fn normalize_model_prefix_value(value: Option<String>) -> Option<String> {
     value
         .map(|item| item.trim().trim_matches('/').trim().to_ascii_lowercase())
@@ -1260,7 +1308,20 @@ fn visible_codex_model_ids_for_api_key(
     api_key: &ResolvedLocalApiKey,
     health_by_account_id: Option<&HashMap<String, RuntimeAccountHealth>>,
 ) -> Vec<String> {
-    let visible = visible_codex_model_ids_for_collection(collection, health_by_account_id);
+    let mut visible = visible_codex_model_ids_for_collection(collection, health_by_account_id);
+    if let Some(provider_gateway) = api_key.provider_gateway.as_ref() {
+        let mut seen: HashSet<String> = visible
+            .iter()
+            .map(|model| model.trim().to_ascii_lowercase())
+            .filter(|model| !model.is_empty())
+            .collect();
+        for model in &provider_gateway.upstream_models {
+            let model = model.trim();
+            if !model.is_empty() && seen.insert(model.to_ascii_lowercase()) {
+                visible.push(model.to_string());
+            }
+        }
+    }
     let filtered = apply_model_filters(visible, &api_key.allowed_models, &api_key.excluded_models);
     append_codex_internal_model_ids(add_model_prefix(filtered, api_key.model_prefix.as_deref()))
 }
@@ -1306,7 +1367,7 @@ fn validate_client_model_visible(
     if is_codex_internal_model(without_prefix) || is_codex_internal_model(canonical_model) {
         return true;
     }
-    let visible = visible_codex_model_ids_for_collection(collection, health_by_account_id);
+    let visible = visible_codex_model_ids_for_api_key(collection, api_key, health_by_account_id);
     let visible_match = visible.iter().any(|item| {
         item.eq_ignore_ascii_case(without_prefix)
             || item.eq_ignore_ascii_case(canonical_model)
@@ -5336,7 +5397,7 @@ fn remove_codex_local_access_config(config_text: &str) -> Result<String, String>
         let _ = doc.remove("model_providers");
     }
 
-    Ok(crate::modules::codex_config_format::normalize_config_toml_spacing(&doc.to_string()))
+    Ok(crate::modules::codex_config_format::codex_config_doc_to_string(&mut doc))
 }
 
 fn restore_config_toml_from_takeover_backup(
@@ -5366,8 +5427,7 @@ fn restore_config_toml_from_takeover_backup(
         }
     }
 
-    let content =
-        crate::modules::codex_config_format::normalize_config_toml_spacing(&backup_doc.to_string());
+    let content = crate::modules::codex_config_format::codex_config_doc_to_string(&mut backup_doc);
     if content.trim().is_empty() {
         Ok(None)
     } else {
@@ -5806,6 +5866,58 @@ fn sidecar_auth_file_name(account_id: &str) -> String {
     format!("{safe}.json")
 }
 
+fn sidecar_stable_id(kind: &str, parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(kind.trim().as_bytes());
+    for part in parts {
+        hasher.update([0]);
+        hasher.update(part.trim().as_bytes());
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    let short = digest.get(..12).unwrap_or(digest.as_str());
+    format!("{}:{}", kind.trim(), short)
+}
+
+fn sidecar_codex_api_key_auth_id(account: &CodexAccount) -> Option<String> {
+    let api_key = account.openai_api_key.as_deref()?.trim();
+    if api_key.is_empty() {
+        return None;
+    }
+    let base_url = account
+        .api_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_OPENAI_RESPONSES_BASE_URL);
+    Some(sidecar_stable_id("codex:apikey", &[api_key, base_url]))
+}
+
+fn sidecar_auth_id_for_account_id(account_id: &str) -> Option<String> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return None;
+    }
+    let account = codex_account::load_account(account_id)?;
+    if account.is_api_key_auth() {
+        return sidecar_codex_api_key_auth_id(&account);
+    }
+    Some(sidecar_auth_file_name(&account.id))
+}
+
+fn sidecar_auth_ids_for_account_ids(account_ids: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut values = Vec::new();
+    for account_id in account_ids {
+        let Some(auth_id) = sidecar_auth_id_for_account_id(&account_id) else {
+            continue;
+        };
+        if seen.insert(auth_id.clone()) {
+            values.push(auth_id);
+        }
+    }
+    values
+}
+
 fn sidecar_duration_ms(value_ms: i64) -> String {
     format!("{}ms", value_ms.max(1))
 }
@@ -5861,12 +5973,13 @@ fn sidecar_codex_key_model_values(collection: &CodexLocalAccessCollection) -> Ve
 
 fn sidecar_api_key_manifest_values(collection: &CodexLocalAccessCollection) -> Vec<Value> {
     let mut values = Vec::new();
-    if !collection.api_key.trim().is_empty() {
+    if !collection.api_key.trim().is_empty() && !collection.account_ids.is_empty() {
         values.push(json!({
             "id": "legacy",
             "label": default_local_api_key_label(),
             "key": collection.api_key.trim(),
             "enabled": true,
+            "accountIds": collection.account_ids.clone(),
             "allowedModels": [],
             "excludedModels": [],
         }));
@@ -5875,10 +5988,16 @@ fn sidecar_api_key_manifest_values(collection: &CodexLocalAccessCollection) -> V
         if !item.enabled || item.key.trim().is_empty() {
             continue;
         }
+        let account_ids = effective_api_key_account_ids(collection, item);
+        if account_ids.is_empty() {
+            continue;
+        }
         values.push(json!({
             "id": item.id.clone(),
             "label": item.label.clone(),
             "key": item.key.trim(),
+            "providerGateway": item.provider_gateway.clone(),
+            "accountIds": account_ids,
             "modelPrefix": item.model_prefix.clone(),
             "allowedModels": item.allowed_models.clone(),
             "excludedModels": item.excluded_models.clone(),
@@ -5886,6 +6005,82 @@ fn sidecar_api_key_manifest_values(collection: &CodexLocalAccessCollection) -> V
         }));
     }
     values
+}
+
+fn effective_api_key_account_ids(
+    collection: &CodexLocalAccessCollection,
+    api_key: &CodexLocalAccessApiKey,
+) -> Vec<String> {
+    if api_key.provider_gateway.is_some() {
+        return api_key.account_ids.clone();
+    }
+    if api_key.account_ids.is_empty() {
+        collection.account_ids.clone()
+    } else {
+        api_key.account_ids.clone()
+    }
+}
+
+fn effective_sidecar_account_ids(collection: &CodexLocalAccessCollection) -> Vec<String> {
+    let mut account_ids = collection.account_ids.clone();
+    let mut seen: HashSet<String> = account_ids.iter().cloned().collect();
+    for api_key in &collection.api_keys {
+        for account_id in &api_key.account_ids {
+            if seen.insert(account_id.clone()) {
+                account_ids.push(account_id.clone());
+            }
+        }
+    }
+    account_ids
+}
+
+fn sidecar_client_api_keys(collection: &CodexLocalAccessCollection) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut seen = HashSet::new();
+    if !collection.api_key.trim().is_empty()
+        && !collection.account_ids.is_empty()
+        && seen.insert(collection.api_key.trim().to_string())
+    {
+        keys.push(collection.api_key.trim().to_string());
+    }
+    for item in &collection.api_keys {
+        let key = item.key.trim();
+        if item.enabled
+            && !key.is_empty()
+            && (item.provider_gateway.is_some()
+                || !effective_api_key_account_ids(collection, item).is_empty())
+            && seen.insert(key.to_string())
+        {
+            keys.push(key.to_string());
+        }
+    }
+    keys
+}
+
+fn sidecar_api_key_account_scope_values(collection: &CodexLocalAccessCollection) -> Value {
+    let mut values = Map::new();
+    if !collection.api_key.trim().is_empty() && !collection.account_ids.is_empty() {
+        let auth_ids = sidecar_auth_ids_for_account_ids(collection.account_ids.clone());
+        if !auth_ids.is_empty() {
+            values.insert(collection.api_key.trim().to_string(), json!(auth_ids));
+        }
+    }
+    for item in &collection.api_keys {
+        let key = item.key.trim();
+        if !item.enabled || key.is_empty() {
+            continue;
+        }
+        if item.provider_gateway.is_some() {
+            continue;
+        }
+        let auth_ids =
+            sidecar_auth_ids_for_account_ids(effective_api_key_account_ids(collection, item));
+        if auth_ids.is_empty() {
+            continue;
+        }
+        values.insert(key.to_string(), json!(auth_ids));
+    }
+    Value::Object(values)
 }
 
 fn sidecar_auth_json_for_account(
@@ -6255,15 +6450,15 @@ async fn prepare_sidecar_launch_config(
     };
     let mut manifest_accounts = Vec::new();
     let mut codex_keys = Vec::new();
-    for account_id in &collection.account_ids {
-        if account_health_blocks_routing(health_snapshot.get(account_id)) {
+    for account_id in effective_sidecar_account_ids(collection) {
+        if account_health_blocks_routing(health_snapshot.get(&account_id)) {
             logger::log_codex_api_warn(&format!(
                 "[CodexLocalAccess] sidecar 跳过异常账号: account_id={}",
                 account_id
             ));
             continue;
         }
-        let Some(account) = load_sidecar_account(account_id).await else {
+        let Some(account) = load_sidecar_account(&account_id).await else {
             logger::log_codex_api_warn(&format!(
                 "[CodexLocalAccess] sidecar 跳过不存在账号: account_id={}",
                 account_id
@@ -6334,6 +6529,14 @@ async fn prepare_sidecar_launch_config(
         json!(auths_dir.to_string_lossy().to_string()),
     );
     config.insert("debug".to_string(), json!(collection.debug_logs));
+    config.insert(
+        "api-keys".to_string(),
+        json!(sidecar_client_api_keys(collection)),
+    );
+    config.insert(
+        "api-key-account-ids".to_string(),
+        sidecar_api_key_account_scope_values(collection),
+    );
     config.insert("request-log".to_string(), json!(false));
     config.insert("logging-to-file".to_string(), json!(false));
     config.insert("commercial-mode".to_string(), json!(true));
@@ -7093,6 +7296,7 @@ fn build_runtime_account(
         Some(base_url),
         Some(CODEX_LOCAL_ACCESS_RUNTIME_PROVIDER_ID.to_string()),
         Some("Codex API Service".to_string()),
+        Vec::new(),
     );
     runtime_account.account_name = Some("API Service".to_string());
     runtime_account.bound_oauth_account_id = bound_oauth_account_id;
@@ -7102,6 +7306,7 @@ fn build_runtime_account(
 async fn write_local_access_profile_takeover(
     profile_dir: &Path,
     collection: &CodexLocalAccessCollection,
+    api_key: Option<&str>,
 ) -> Result<(), String> {
     let bound_oauth_account_id =
         normalize_optional_account_ref(collection.bound_oauth_account_id.as_deref());
@@ -7111,7 +7316,11 @@ async fn write_local_access_profile_takeover(
     }
     let runtime_account = build_runtime_account(
         build_collection_base_url(collection),
-        collection.api_key.clone(),
+        api_key
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| collection.api_key.clone()),
         bound_oauth_account_id,
     );
     codex_account::write_account_bundle_to_dir(profile_dir, &runtime_account)
@@ -7192,7 +7401,7 @@ async fn ensure_profile_takeover(
     }
 
     save_profile_takeover_backup(profile_dir, &collection.api_key)?;
-    write_local_access_profile_takeover(profile_dir, collection).await?;
+    write_local_access_profile_takeover(profile_dir, collection, None).await?;
 
     let next = inspect_local_access_profile_attachment(profile_dir, Some(collection));
     if !next.attached {
@@ -7288,6 +7497,8 @@ fn build_local_access_api_key(label: Option<&str>) -> CodexLocalAccessApiKey {
         id: generate_local_api_key_id(),
         label: normalize_api_key_label(label, &default_local_api_key_label()),
         key: generate_local_api_key(),
+        provider_gateway: None,
+        account_ids: Vec::new(),
         model_prefix: None,
         allowed_models: Vec::new(),
         excluded_models: Vec::new(),
@@ -7312,6 +7523,8 @@ fn normalize_collection_api_keys(collection: &mut CodexLocalAccessCollection) ->
             id: generate_local_api_key_id(),
             label: default_local_api_key_label(),
             key,
+            provider_gateway: None,
+            account_ids: Vec::new(),
             model_prefix: None,
             allowed_models: Vec::new(),
             excluded_models: Vec::new(),
@@ -7343,6 +7556,14 @@ fn normalize_collection_api_keys(collection: &mut CodexLocalAccessCollection) ->
         if normalized_label != item.label {
             item.label = normalized_label;
             changed = true;
+        }
+        let original_account_ids = std::mem::take(&mut item.account_ids);
+        let normalized_account_ids = normalize_account_id_list(original_account_ids.clone());
+        if normalized_account_ids != original_account_ids {
+            item.account_ids = normalized_account_ids;
+            changed = true;
+        } else {
+            item.account_ids = original_account_ids;
         }
         if item.created_at <= 0 {
             item.created_at = now;
@@ -7414,6 +7635,8 @@ fn resolve_collection_api_key(
         .map(|item| ResolvedLocalApiKey {
             id: item.id.clone(),
             label: item.label.clone(),
+            provider_gateway: item.provider_gateway.clone(),
+            account_ids: item.account_ids.clone(),
             model_prefix: item.model_prefix.clone(),
             allowed_models: item.allowed_models.clone(),
             excluded_models: item.excluded_models.clone(),
@@ -7423,6 +7646,8 @@ fn resolve_collection_api_key(
                 Some(ResolvedLocalApiKey {
                     id: "legacy".to_string(),
                     label: default_local_api_key_label(),
+                    provider_gateway: None,
+                    account_ids: Vec::new(),
                     model_prefix: None,
                     allowed_models: Vec::new(),
                     excluded_models: Vec::new(),
@@ -7431,6 +7656,31 @@ fn resolve_collection_api_key(
                 None
             }
         })
+}
+
+fn scoped_collection_account_ids(
+    collection: &CodexLocalAccessCollection,
+    api_key: &ResolvedLocalApiKey,
+) -> Vec<String> {
+    if api_key.account_ids.is_empty() {
+        collection.account_ids.clone()
+    } else {
+        api_key.account_ids.clone()
+    }
+}
+
+fn request_ordered_account_ids(
+    collection: &CodexLocalAccessCollection,
+    scoped_account_ids: &[String],
+    start: usize,
+    affinity_account_id: Option<&str>,
+) -> Vec<String> {
+    if scoped_account_ids == collection.account_ids.as_slice()
+        && collection.routing_strategy == CodexLocalAccessRoutingStrategy::Custom
+    {
+        return collection.account_ids.clone();
+    }
+    build_ordered_account_ids(scoped_account_ids, start, affinity_account_id)
 }
 
 fn allocate_random_local_port(bind_host: &str) -> Result<u16, String> {
@@ -8478,6 +8728,16 @@ fn sanitize_collection(
     if deduped != collection.account_ids {
         collection.account_ids = deduped;
         changed = true;
+    }
+
+    for api_key in &mut collection.api_keys {
+        let before = api_key.account_ids.clone();
+        api_key
+            .account_ids
+            .retain(|account_id| valid_account_ids.contains(account_id));
+        if api_key.account_ids != before {
+            changed = true;
+        }
     }
 
     let original_custom_routing_rules = std::mem::take(&mut collection.custom_routing_rules);
@@ -9592,8 +9852,487 @@ pub async fn activate_local_access_for_dir(
         .collection
         .clone()
         .ok_or_else(|| "API 服务集合尚未创建".to_string())?;
-    write_local_access_profile_takeover(profile_dir, &collection).await?;
+    write_local_access_profile_takeover(profile_dir, &collection, None).await?;
     Ok(state)
+}
+
+fn new_empty_local_access_collection() -> Result<CodexLocalAccessCollection, String> {
+    Ok(CodexLocalAccessCollection {
+        enabled: false,
+        port: allocate_initial_local_port(CODEX_LOCAL_ACCESS_LOCALHOST_BIND_HOST)?,
+        api_key: generate_local_api_key(),
+        api_keys: Vec::new(),
+        access_scope: CodexLocalAccessScope::Localhost,
+        client_base_url_host: CodexLocalAccessClientBaseUrlHost::default(),
+        image_generation_mode: CodexLocalAccessImageGenerationMode::default(),
+        gateway_mode: CodexLocalAccessGatewayMode::default(),
+        upstream_proxy_url: None,
+        routing_strategy: CodexLocalAccessRoutingStrategy::default(),
+        custom_routing_rules: Vec::new(),
+        account_model_rules: Vec::new(),
+        model_aliases: Vec::new(),
+        model_pricings: Vec::new(),
+        excluded_models: Vec::new(),
+        session_affinity: false,
+        session_affinity_ttl_ms: DEFAULT_SESSION_AFFINITY_TTL_MS,
+        max_retry_credentials: 0,
+        max_retry_interval_ms: DEFAULT_MAX_RETRY_INTERVAL_MS,
+        timeouts: CodexLocalAccessTimeouts::default(),
+        active_timeout_preset_id: BUILTIN_TIMEOUT_PRESET_LONG_WAIT_ID.to_string(),
+        timeout_presets: Vec::new(),
+        disable_cooling: false,
+        restrict_free_accounts: true,
+        debug_logs: true,
+        bound_oauth_account_id: None,
+        account_ids: Vec::new(),
+        created_at: now_ms(),
+        updated_at: now_ms(),
+    })
+}
+
+fn provider_gateway_api_key_id(account_id: &str) -> String {
+    format!("provider_gateway_{}", account_id)
+}
+
+fn normalize_provider_gateway_models(models: Vec<&str>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut values = Vec::new();
+    for model in models {
+        let model = model.trim();
+        if model.is_empty() || !seen.insert(model.to_ascii_lowercase()) {
+            continue;
+        }
+        values.push(model.to_string());
+    }
+    values
+}
+
+fn provider_gateway_models_for_account(account: &CodexAccount) -> Vec<String> {
+    let account_catalog = normalize_provider_gateway_models(
+        account
+            .api_model_catalog
+            .iter()
+            .map(String::as_str)
+            .collect(),
+    );
+    if !account_catalog.is_empty() {
+        return account_catalog;
+    }
+    let provider_id = account
+        .api_provider_id
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let base_url = account
+        .api_base_url
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if provider_id == "deepseek" || base_url.contains("api.deepseek.com") {
+        return normalize_provider_gateway_models(vec!["deepseek-v4-pro", "deepseek-v4-flash"]);
+    }
+    if provider_id == "moonshot" || base_url.contains("api.moonshot.cn") {
+        return normalize_provider_gateway_models(vec!["kimi-k2.6"]);
+    }
+    if provider_id == "zhipu_glm"
+        || provider_id == "zhipu_glm_en"
+        || base_url.contains("open.bigmodel.cn")
+        || base_url.contains("api.z.ai")
+    {
+        return normalize_provider_gateway_models(vec!["glm-5.1"]);
+    }
+    Vec::new()
+}
+
+fn provider_gateway_default_model_for_account(account: &CodexAccount) -> String {
+    provider_gateway_models_for_account(account)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
+fn provider_gateway_wire_api_for_account(account: &CodexAccount) -> String {
+    if account.auth_mode != CodexAuthMode::Apikey {
+        return "responses".to_string();
+    }
+    if let Some(wire_api) = account
+        .api_wire_api
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| *value == "responses" || *value == "chat_completions")
+    {
+        return wire_api.to_string();
+    }
+    let base_url = account
+        .api_base_url
+        .as_deref()
+        .unwrap_or(DEFAULT_OPENAI_RESPONSES_BASE_URL)
+        .trim()
+        .to_ascii_lowercase();
+    if base_url.contains("/chat/completions") {
+        return "chat_completions".to_string();
+    }
+    let host = Url::parse(&base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
+        .unwrap_or_default();
+    let chat_hosts = [
+        "api.deepseek.com",
+        "api.moonshot.cn",
+        "api.siliconflow.cn",
+        "api.siliconflow.com",
+        "open.bigmodel.cn",
+        "api.z.ai",
+        "volces.com",
+        "bytepluses.com",
+        "qianfan.baidubce.com",
+        "dashscope.aliyuncs.com",
+        "api.stepfun.com",
+        "api.stepfun.ai",
+        "modelscope.cn",
+        "api.longcat.chat",
+        "api.minimax.io",
+        "api.mini-max.chat",
+        "api.minimaxi.com",
+        "api.tbox.cn",
+        "api.mimo.dev",
+        "api.xiaomimimo.com",
+        "token-plan-cn.xiaomimimo.com",
+        "api.novita.ai",
+        "integrate.api.nvidia.com",
+        "runapi.co",
+        "www.relaxycode.com",
+        "cp.compshare.cn",
+        "api.lemondata.cc",
+        "e-flowcode.cc",
+        "cc-api.pipellm.ai",
+        "openrouter.ai",
+        "api.therouter.ai",
+    ];
+    if chat_hosts.iter().any(|pattern| host.contains(pattern)) {
+        "chat_completions".to_string()
+    } else {
+        "responses".to_string()
+    }
+}
+
+fn provider_gateway_for_account(
+    account: &CodexAccount,
+) -> Result<CodexLocalAccessProviderGateway, String> {
+    let api_key = account
+        .openai_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "供应商账号缺少上游 API Key".to_string())?;
+    let base_url = account
+        .api_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_OPENAI_RESPONSES_BASE_URL);
+    Ok(CodexLocalAccessProviderGateway {
+        base_url: base_url.to_string(),
+        api_key: api_key.to_string(),
+        upstream_model: provider_gateway_default_model_for_account(account),
+        upstream_models: provider_gateway_models_for_account(account),
+        wire_api: Some(provider_gateway_wire_api_for_account(account)),
+        supports_vision: account.api_supports_vision,
+        model_capabilities: account
+            .api_model_vision_support
+            .iter()
+            .filter_map(|(model, supports_vision)| {
+                let model = model.trim().to_lowercase();
+                if model.is_empty() {
+                    None
+                } else {
+                    Some((
+                        model,
+                        CodexLocalAccessProviderGatewayModelCapability {
+                            supports_vision: *supports_vision,
+                        },
+                    ))
+                }
+            })
+            .collect(),
+    })
+}
+
+fn write_local_access_profile_model_override(
+    profile_dir: &Path,
+    model: &str,
+) -> Result<(), String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(());
+    }
+    let config_path = profile_config_path(profile_dir);
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let mut doc = if existing.trim().is_empty() {
+        Document::new()
+    } else {
+        existing
+            .parse::<Document>()
+            .map_err(|e| format!("解析 Codex config.toml 失败: {}", e))?
+    };
+    doc["model"] = value(model);
+    let content = crate::modules::codex_config_format::codex_config_doc_to_string(&mut doc);
+    write_string_atomic(&config_path, &content)
+}
+
+fn write_provider_gateway_model_catalog(
+    profile_dir: &Path,
+    models: &[String],
+) -> Result<(), String> {
+    let mut model_ids =
+        normalize_provider_gateway_models(models.iter().map(String::as_str).collect());
+    if !model_ids
+        .iter()
+        .any(|model| model.eq_ignore_ascii_case(CODEX_AUTO_REVIEW_MODEL_ID))
+    {
+        model_ids.push(CODEX_AUTO_REVIEW_MODEL_ID.to_string());
+    }
+
+    let client_models = codex_protocol::build_codex_client_models_response(&model_ids);
+    let catalog = json!({
+        "models": client_models
+            .get("models")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    });
+    let content = serde_json::to_string_pretty(&catalog)
+        .map_err(|e| format!("生成 Codex 模型目录失败: {}", e))?;
+    write_string_atomic(
+        &profile_dir.join(CODEX_PROVIDER_MODEL_CATALOG_FILE),
+        &content,
+    )
+    .map_err(|e| format!("写入 Codex 模型目录失败: {}", e))?;
+
+    let config_path = profile_config_path(profile_dir);
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let mut doc = if existing.trim().is_empty() {
+        Document::new()
+    } else {
+        existing
+            .parse::<Document>()
+            .map_err(|e| format!("解析 Codex config.toml 失败: {}", e))?
+    };
+    doc["model_catalog_json"] = value(CODEX_PROVIDER_MODEL_CATALOG_FILE);
+    let content = crate::modules::codex_config_format::codex_config_doc_to_string(&mut doc);
+    write_string_atomic(&config_path, &content)
+}
+
+fn provider_model_backup_path(profile_dir: &Path) -> PathBuf {
+    profile_dir.join(CODEX_PROVIDER_MODEL_BACKUP_FILE)
+}
+
+fn read_provider_model_backup(profile_dir: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(provider_model_backup_path(profile_dir)).ok()?;
+    let parsed = serde_json::from_str::<Value>(&content).ok()?;
+    parsed
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn save_provider_model_backup(profile_dir: &Path, model: &str) -> Result<(), String> {
+    let model = model.trim();
+    if model.is_empty() {
+        return Ok(());
+    }
+    let content = serde_json::to_string_pretty(&json!({ "model": model }))
+        .map_err(|e| format!("生成 Codex provider 模型备份失败: {}", e))?;
+    write_string_atomic(&provider_model_backup_path(profile_dir), &content)
+        .map_err(|e| format!("写入 Codex provider 模型备份失败: {}", e))
+}
+
+fn delete_provider_model_backup(profile_dir: &Path) -> Result<(), String> {
+    let path = provider_model_backup_path(profile_dir);
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("删除 Codex provider 模型备份失败: {}", e))?;
+    }
+    Ok(())
+}
+
+fn backup_current_profile_model_before_provider_gateway(
+    profile_dir: &Path,
+    provider_models: &[String],
+) -> Result<(), String> {
+    let config_path = profile_config_path(profile_dir);
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    if existing.trim().is_empty() {
+        delete_provider_model_backup(profile_dir)?;
+        return Ok(());
+    }
+    let doc = existing
+        .parse::<Document>()
+        .map_err(|e| format!("解析 Codex config.toml 失败: {}", e))?;
+    let Some(model) = doc
+        .get("model")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        delete_provider_model_backup(profile_dir)?;
+        return Ok(());
+    };
+    if provider_models
+        .iter()
+        .any(|item| item.trim().eq_ignore_ascii_case(model))
+    {
+        delete_provider_model_backup(profile_dir)?;
+        return Ok(());
+    }
+    save_provider_model_backup(profile_dir, model)
+}
+
+pub fn cleanup_provider_gateway_profile_model_overrides(profile_dir: &Path) -> Result<(), String> {
+    let catalog_path = profile_dir.join(CODEX_PROVIDER_MODEL_CATALOG_FILE);
+    let previous_model = read_provider_model_backup(profile_dir);
+    let mut managed_models = HashSet::new();
+    if let Ok(content) = std::fs::read_to_string(&catalog_path) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(&content) {
+            if let Some(models) = parsed.get("models").and_then(Value::as_array) {
+                for model in models {
+                    if let Some(slug) = model.get("slug").and_then(Value::as_str) {
+                        let slug = slug.trim();
+                        if !slug.is_empty() {
+                            managed_models.insert(slug.to_ascii_lowercase());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let config_path = profile_config_path(profile_dir);
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    if !existing.trim().is_empty() {
+        let mut doc = existing
+            .parse::<Document>()
+            .map_err(|e| format!("解析 Codex config.toml 失败: {}", e))?;
+        let mut changed = false;
+        if doc.get("model_catalog_json").is_some() {
+            doc.remove("model_catalog_json");
+            changed = true;
+        }
+        if let Some(previous_model) = previous_model.as_deref() {
+            doc["model"] = value(previous_model);
+            changed = true;
+        } else {
+            let current_model = doc
+                .get("model")
+                .and_then(|item| item.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_ascii_lowercase);
+            if let Some(model) = current_model {
+                if managed_models.contains(&model) {
+                    doc.remove("model");
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            let content = crate::modules::codex_config_format::codex_config_doc_to_string(&mut doc);
+            write_string_atomic(&config_path, &content)
+                .map_err(|e| format!("写入 Codex config.toml 失败: {}", e))?;
+        }
+    }
+
+    if catalog_path.exists() {
+        std::fs::remove_file(&catalog_path)
+            .map_err(|e| format!("删除 Codex provider 模型目录失败: {}", e))?;
+    }
+    delete_provider_model_backup(profile_dir)?;
+    Ok(())
+}
+
+pub async fn activate_provider_gateway_for_dir(
+    profile_dir: &Path,
+    account_id: &str,
+) -> Result<CodexLocalAccessState, String> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return Err("供应商网关账号不能为空".to_string());
+    }
+
+    ensure_runtime_loaded_without_start().await?;
+
+    let account = codex_account::load_account(account_id)
+        .ok_or_else(|| format!("供应商网关账号不存在: {}", account_id))?;
+    let mut collection = {
+        let runtime = gateway_runtime().lock().await;
+        runtime
+            .collection
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(new_empty_local_access_collection)?
+    };
+    if !is_local_access_eligible_account(&account, collection.restrict_free_accounts) {
+        return Err("该供应商账号不符合本地网关使用条件".to_string());
+    }
+    let provider_gateway = provider_gateway_for_account(&account)?;
+
+    normalize_collection_api_keys(&mut collection);
+    let now = now_ms();
+    let api_key_id = provider_gateway_api_key_id(account_id);
+    let api_key_label = format!("Provider Gateway: {}", account.email);
+    let key = if let Some(api_key) = collection
+        .api_keys
+        .iter_mut()
+        .find(|item| item.id == api_key_id)
+    {
+        api_key.label = api_key_label;
+        api_key.provider_gateway = Some(provider_gateway.clone());
+        api_key.account_ids = vec![account.id.clone()];
+        api_key.enabled = true;
+        api_key.updated_at = now;
+        api_key.key.clone()
+    } else {
+        let mut api_key = build_local_access_api_key(Some(&api_key_label));
+        api_key.id = api_key_id;
+        api_key.provider_gateway = Some(provider_gateway.clone());
+        api_key.account_ids = vec![account.id.clone()];
+        let key = api_key.key.clone();
+        collection.api_keys.push(api_key);
+        key
+    };
+
+    collection.enabled = true;
+    collection.updated_at = now;
+    let (changed, _) = sanitize_collection(&mut collection)?;
+    if changed {
+        collection.updated_at = now_ms();
+    }
+    save_collection_to_disk(&collection)?;
+
+    {
+        let mut runtime = gateway_runtime().lock().await;
+        sync_runtime_collection(&mut runtime, collection.clone());
+    }
+
+    ensure_gateway_matches_runtime().await?;
+    save_profile_takeover_backup(profile_dir, &key)?;
+    write_local_access_profile_takeover(profile_dir, &collection, Some(&key)).await?;
+    cleanup_provider_gateway_profile_model_overrides(profile_dir)?;
+    backup_current_profile_model_before_provider_gateway(
+        profile_dir,
+        &provider_gateway.upstream_models,
+    )?;
+    if !provider_gateway.upstream_model.trim().is_empty() {
+        write_local_access_profile_model_override(profile_dir, &provider_gateway.upstream_model)?;
+    }
+    if !provider_gateway.upstream_models.is_empty() {
+        write_provider_gateway_model_catalog(profile_dir, &provider_gateway.upstream_models)?;
+    }
+    snapshot_state().await
 }
 
 #[derive(Debug, Clone)]
@@ -11001,6 +11740,12 @@ pub async fn update_local_access_image_generation_mode(
 pub async fn remove_local_access_account(
     account_id: &str,
 ) -> Result<CodexLocalAccessState, String> {
+    remove_local_access_accounts(&[account_id.to_string()]).await
+}
+
+pub async fn remove_local_access_accounts(
+    account_ids: &[String],
+) -> Result<CodexLocalAccessState, String> {
     ensure_runtime_loaded().await?;
 
     let maybe_collection = {
@@ -11012,13 +11757,29 @@ pub async fn remove_local_access_account(
         return snapshot_state().await;
     };
 
-    let before_len = collection.account_ids.len();
-    collection.account_ids.retain(|id| id != account_id);
-    if collection.account_ids.len() == before_len {
+    let remove_ids = account_ids
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .collect::<HashSet<_>>();
+    if remove_ids.is_empty() {
         return snapshot_state().await;
     }
 
+    let before_account_ids = collection.account_ids.clone();
+    collection
+        .account_ids
+        .retain(|id| !remove_ids.contains(id.as_str()));
+
     collection.updated_at = now_ms();
+    let (changed, _) = sanitize_collection(&mut collection)?;
+    let account_ids_changed = collection.account_ids != before_account_ids;
+    if !account_ids_changed && !changed {
+        return snapshot_state().await;
+    }
+    if changed || account_ids_changed {
+        collection.updated_at = now_ms();
+    }
     save_collection_to_disk(&collection)?;
 
     {
@@ -13545,9 +14306,11 @@ async fn send_upstream_request(
 async fn proxy_request_with_account_pool(
     request: &ParsedRequest,
     collection: &CodexLocalAccessCollection,
+    api_key: &ResolvedLocalApiKey,
     request_kind: CodexLocalAccessRequestKind,
 ) -> Result<ProxyDispatchSuccess, ProxyDispatchError> {
-    if collection.account_ids.is_empty() {
+    let scoped_account_ids = scoped_collection_account_ids(collection, api_key);
+    if scoped_account_ids.is_empty() {
         return Err(ProxyDispatchError {
             status: 503,
             message: "本地接入集合暂无账号".to_string(),
@@ -13571,7 +14334,7 @@ async fn proxy_request_with_account_pool(
         DEFAULT_UPSTREAM_CONNECT_TIMEOUT,
     );
     let routing_hint = build_request_routing_hint(request);
-    let total = collection.account_ids.len();
+    let total = scoped_account_ids.len();
     let configured_max_credentials = collection.max_retry_credentials as usize;
     let max_credential_attempts = if configured_max_credentials == 0 {
         total
@@ -13604,20 +14367,21 @@ async fn proxy_request_with_account_pool(
 
     loop {
         let start = GATEWAY_ROUND_ROBIN_CURSOR.fetch_add(1, Ordering::Relaxed);
-        let ordered_account_ids =
-            if collection.routing_strategy == CodexLocalAccessRoutingStrategy::Custom {
-                collection.account_ids.clone()
-            } else {
-                build_ordered_account_ids(
-                    &collection.account_ids,
-                    start,
-                    affinity_account_id.as_deref(),
-                )
-            };
+        let ordered_account_ids = request_ordered_account_ids(
+            collection,
+            &scoped_account_ids,
+            start,
+            affinity_account_id.as_deref(),
+        );
+        let strategy = if scoped_account_ids == collection.account_ids {
+            collection.routing_strategy
+        } else {
+            CodexLocalAccessRoutingStrategy::Auto
+        };
         let strategy_account_ids = pin_account_to_front(
             apply_routing_strategy(
                 &ordered_account_ids,
-                collection.routing_strategy,
+                strategy,
                 &collection.custom_routing_rules,
                 start,
             ),
@@ -14622,9 +15386,11 @@ async fn connect_upstream_websocket(
 async fn proxy_websocket_with_account_pool(
     request: &ParsedRequest,
     collection: &CodexLocalAccessCollection,
+    api_key: &ResolvedLocalApiKey,
     request_kind: CodexLocalAccessRequestKind,
 ) -> Result<WebSocketDispatchSuccess, ProxyDispatchError> {
-    if collection.account_ids.is_empty() {
+    let scoped_account_ids = scoped_collection_account_ids(collection, api_key);
+    if scoped_account_ids.is_empty() {
         return Err(ProxyDispatchError {
             status: 503,
             message: "本地接入集合暂无账号".to_string(),
@@ -14648,7 +15414,7 @@ async fn proxy_websocket_with_account_pool(
         CODEX_WEBSOCKET_CONNECT_TIMEOUT,
     );
     let routing_hint = build_request_routing_hint(request);
-    let total = collection.account_ids.len();
+    let total = scoped_account_ids.len();
     let configured_max_credentials = collection.max_retry_credentials as usize;
     let max_credential_attempts = if configured_max_credentials == 0 {
         total
@@ -14668,20 +15434,21 @@ async fn proxy_websocket_with_account_pool(
     } else {
         None
     };
-    let ordered_account_ids =
-        if collection.routing_strategy == CodexLocalAccessRoutingStrategy::Custom {
-            collection.account_ids.clone()
-        } else {
-            build_ordered_account_ids(
-                &collection.account_ids,
-                start,
-                affinity_account_id.as_deref(),
-            )
-        };
+    let ordered_account_ids = request_ordered_account_ids(
+        collection,
+        &scoped_account_ids,
+        start,
+        affinity_account_id.as_deref(),
+    );
+    let strategy = if scoped_account_ids == collection.account_ids {
+        collection.routing_strategy
+    } else {
+        CodexLocalAccessRoutingStrategy::Auto
+    };
     let strategy_account_ids = pin_account_to_front(
         apply_routing_strategy(
             &ordered_account_ids,
-            collection.routing_strategy,
+            strategy,
             &collection.custom_routing_rules,
             start,
         ),
@@ -15176,7 +15943,13 @@ async fn handle_websocket_connection(
     };
     let routing_hint = build_request_routing_hint(&parsed);
 
-    match proxy_websocket_with_account_pool(&parsed, &collection, stats_context.request_kind).await
+    match proxy_websocket_with_account_pool(
+        &parsed,
+        &collection,
+        &resolved_api_key,
+        stats_context.request_kind,
+    )
+    .await
     {
         Ok(success) => {
             let account_id = success.account_id.clone();
@@ -15504,7 +16277,7 @@ async fn handle_connection(
     }
 
     if is_local_models_request(&parsed.target) {
-        if collection.account_ids.is_empty() {
+        if scoped_collection_account_ids(&collection, &resolved_api_key).is_empty() {
             write_json_error_response(
                 &mut stream,
                 Some(&addr),
@@ -15673,6 +16446,7 @@ async fn handle_connection(
     match proxy_request_with_account_pool(
         &prepared_request,
         &collection,
+        &resolved_api_key,
         stats_context.request_kind,
     )
     .await
@@ -15853,13 +16627,15 @@ mod tests {
 
     use super::{
         account_model_rule_blocks_model, account_upstream_base_url, align_codex_prompt_cache,
-        apply_codex_official_headers, apply_routing_strategy, bridge_websocket_streams,
+        apply_codex_official_headers, apply_routing_strategy,
+        backup_current_profile_model_before_provider_gateway, bridge_websocket_streams,
         build_account_scoped_upstream_body, build_base_url_with_host,
         build_chat_completion_payload, build_chat_completion_stream_body,
         build_codex_client_models_response, build_collection_base_url, build_images_api_payload,
         build_local_models_response, build_ordered_account_ids, build_request_routing_hint,
         build_upstream_websocket_url, calculate_usage_cost_usd, canonical_model_for_client_model,
         classify_upstream_error_category, cleanup_profile_takeover_without_backup,
+        cleanup_provider_gateway_profile_model_overrides,
         collect_local_access_profile_takeover_dirs_from_store, compare_routing_candidates,
         extract_usage_capture, inspect_local_access_profile_config,
         is_codex_local_access_auth_text, is_codex_local_access_config_for_api_key,
@@ -15870,24 +16646,29 @@ mod tests {
         model_pricing, normalize_account_model_rules, normalize_custom_routing_rules,
         normalized_sidecar_error_category, parse_codex_retry_after,
         parse_responses_payload_from_upstream, parse_websocket_upstream_error,
-        prepare_gateway_request, profile_base_url_matches, recover_invalid_stats_file,
-        remove_codex_local_access_config, resolve_plan_rank, resolve_supported_model_alias,
-        resolve_upstream_target, restore_config_toml_from_takeover_backup,
-        should_retry_single_account_upstream_status, should_treat_response_as_stream,
-        should_try_next_account, validate_client_model_visible,
-        visible_codex_model_ids_for_api_key, websocket_accept_value,
-        websocket_connect_error_from_http_response, CodexLocalAccessCollection,
-        CodexLocalAccessGatewayMode, CodexLocalAccessScope, GatewayResponseAdapter, ParsedRequest,
-        ResolvedLocalApiKey, ResponseUsageCollector, RoutingCandidate, SidecarUsageDetails,
-        SidecarUsageEvent, UsageCapture, CODEX_AUTO_REVIEW_MODEL_ID, CODEX_PROFILE_AUTH_FILE,
-        CODEX_PROFILE_CONFIG_FILE, DEFAULT_MAX_RETRY_INTERVAL_MS, DEFAULT_SESSION_AFFINITY_TTL_MS,
+        prepare_gateway_request, profile_base_url_matches,
+        provider_gateway_default_model_for_account, provider_gateway_models_for_account,
+        recover_invalid_stats_file, remove_codex_local_access_config, resolve_plan_rank,
+        resolve_supported_model_alias, resolve_upstream_target,
+        restore_config_toml_from_takeover_backup, should_retry_single_account_upstream_status,
+        should_treat_response_as_stream, should_try_next_account, sidecar_codex_api_key_auth_id,
+        sidecar_stable_id, validate_client_model_visible, visible_codex_model_ids_for_api_key,
+        websocket_accept_value, websocket_connect_error_from_http_response,
+        write_local_access_profile_model_override, write_provider_gateway_model_catalog,
+        write_string_atomic, CodexLocalAccessCollection, CodexLocalAccessGatewayMode,
+        CodexLocalAccessScope, GatewayResponseAdapter, ParsedRequest, ResolvedLocalApiKey,
+        ResponseUsageCollector, RoutingCandidate, SidecarUsageDetails, SidecarUsageEvent,
+        UsageCapture, CODEX_AUTO_REVIEW_MODEL_ID, CODEX_PROFILE_AUTH_FILE,
+        CODEX_PROFILE_CONFIG_FILE, CODEX_PROVIDER_MODEL_BACKUP_FILE,
+        CODEX_PROVIDER_MODEL_CATALOG_FILE, DEFAULT_MAX_RETRY_INTERVAL_MS,
+        DEFAULT_SESSION_AFFINITY_TTL_MS,
     };
     use crate::models::codex::{CodexAccount, CodexApiProviderMode, CodexAppSpeed, CodexTokens};
     use crate::models::codex_local_access::{
         CodexLocalAccessAccountModelRule, CodexLocalAccessClientBaseUrlHost,
         CodexLocalAccessCustomRoutingRule, CodexLocalAccessImageGenerationMode,
-        CodexLocalAccessRequestKind, CodexLocalAccessRoutingStrategy, CodexLocalAccessStats,
-        CodexLocalAccessTimeouts,
+        CodexLocalAccessProviderGateway, CodexLocalAccessRequestKind,
+        CodexLocalAccessRoutingStrategy, CodexLocalAccessStats, CodexLocalAccessTimeouts,
     };
     use crate::models::{
         DefaultInstanceSettings, InstanceLaunchMode, InstanceProfile, InstanceStore,
@@ -15902,6 +16683,7 @@ mod tests {
     use tokio::time::Duration;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::Message;
+    use toml_edit::{value, Document};
 
     fn test_local_access_collection(account_ids: Vec<String>) -> CodexLocalAccessCollection {
         CodexLocalAccessCollection {
@@ -15935,6 +16717,236 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    #[test]
+    fn sidecar_stable_id_matches_config_synthesizer_rule() {
+        assert_eq!(
+            sidecar_stable_id("codex:apikey", &["sk-test", "https://api.deepseek.com/v1"]),
+            "codex:apikey:b1193dcdb71b"
+        );
+    }
+
+    #[test]
+    fn sidecar_codex_api_key_auth_id_uses_api_key_identity() {
+        let account = CodexAccount::new_api_key(
+            "local-account-id".to_string(),
+            "deepseek@example.com".to_string(),
+            "sk-test".to_string(),
+            CodexApiProviderMode::Custom,
+            Some("https://api.deepseek.com/v1".to_string()),
+            Some("deepseek".to_string()),
+            Some("DeepSeek".to_string()),
+            Vec::new(),
+        );
+
+        assert_eq!(
+            sidecar_codex_api_key_auth_id(&account).as_deref(),
+            Some("codex:apikey:b1193dcdb71b")
+        );
+    }
+
+    #[test]
+    fn provider_gateway_models_prefers_account_catalog() {
+        let mut account = CodexAccount::new_api_key(
+            "local-account-id".to_string(),
+            "deepseek@example.com".to_string(),
+            "sk-test".to_string(),
+            CodexApiProviderMode::Custom,
+            Some("https://api.deepseek.com/v1".to_string()),
+            Some("deepseek".to_string()),
+            Some("DeepSeek".to_string()),
+            vec![
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ],
+        );
+        account.api_model_catalog.push(" ".to_string());
+
+        assert_eq!(
+            provider_gateway_models_for_account(&account),
+            vec![
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_gateway_models_empty_for_unknown_provider_without_catalog() {
+        let account = CodexAccount::new_api_key(
+            "local-account-id".to_string(),
+            "custom@example.com".to_string(),
+            "sk-test".to_string(),
+            CodexApiProviderMode::Custom,
+            Some("https://example-provider.test/v1".to_string()),
+            Some("custom-provider".to_string()),
+            Some("Custom Provider".to_string()),
+            Vec::new(),
+        );
+
+        assert!(provider_gateway_models_for_account(&account).is_empty());
+        assert!(provider_gateway_default_model_for_account(&account).is_empty());
+    }
+
+    #[test]
+    fn provider_gateway_writes_model_catalog_json() {
+        let profile_dir = std::env::temp_dir().join(format!(
+            "cockpit-provider-model-catalog-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&profile_dir).expect("create temp profile");
+
+        write_provider_gateway_model_catalog(
+            &profile_dir,
+            &[
+                "deepseek-v4-flash".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ],
+        )
+        .expect("write model catalog");
+
+        let cache_path = profile_dir.join(CODEX_PROVIDER_MODEL_CATALOG_FILE);
+        let content = fs::read_to_string(&cache_path).expect("read model catalog");
+        let parsed: Value = serde_json::from_str(&content).expect("parse models cache");
+        let models = parsed
+            .get("models")
+            .and_then(Value::as_array)
+            .expect("models should be an array");
+
+        assert!(models.iter().any(|model| {
+            model.get("slug").and_then(Value::as_str) == Some("deepseek-v4-flash")
+                && model.get("display_name").and_then(Value::as_str) == Some("deepseek-v4-flash")
+                && model.get("visibility").and_then(Value::as_str) == Some("list")
+        }));
+        assert!(models
+            .iter()
+            .any(|model| { model.get("slug").and_then(Value::as_str) == Some("deepseek-v4-pro") }));
+        assert!(models.iter().any(|model| {
+            model.get("slug").and_then(Value::as_str) == Some(CODEX_AUTO_REVIEW_MODEL_ID)
+                && model.get("visibility").and_then(Value::as_str) == Some("hide")
+        }));
+        let config =
+            fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
+        assert!(config.contains(&format!(
+            "model_catalog_json = \"{}\"",
+            CODEX_PROVIDER_MODEL_CATALOG_FILE
+        )));
+
+        let _ = fs::remove_dir_all(&profile_dir);
+    }
+
+    #[test]
+    fn provider_gateway_cleanup_removes_managed_model_override() {
+        let profile_dir = std::env::temp_dir().join(format!(
+            "cockpit-provider-model-cleanup-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&profile_dir).expect("create temp profile");
+
+        write_provider_gateway_model_catalog(
+            &profile_dir,
+            &[
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ],
+        )
+        .expect("write model catalog");
+        write_local_access_profile_model_override(&profile_dir, "deepseek-v4-pro")
+            .expect("write model override");
+
+        cleanup_provider_gateway_profile_model_overrides(&profile_dir).expect("cleanup overrides");
+
+        assert!(!profile_dir.join(CODEX_PROVIDER_MODEL_CATALOG_FILE).exists());
+        let config =
+            fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
+        assert!(!config.contains("model_catalog_json"));
+        assert!(!config.contains("model = \"deepseek-v4-pro\""));
+
+        let _ = fs::remove_dir_all(&profile_dir);
+    }
+
+    #[test]
+    fn provider_gateway_cleanup_restores_previous_official_model() {
+        let profile_dir = std::env::temp_dir().join(format!(
+            "cockpit-provider-model-restore-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&profile_dir).expect("create temp profile");
+
+        write_local_access_profile_model_override(&profile_dir, "gpt-5.5")
+            .expect("write official model");
+        backup_current_profile_model_before_provider_gateway(
+            &profile_dir,
+            &[
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ],
+        )
+        .expect("backup official model");
+        write_provider_gateway_model_catalog(
+            &profile_dir,
+            &[
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ],
+        )
+        .expect("write model catalog");
+        write_local_access_profile_model_override(&profile_dir, "deepseek-v4-pro")
+            .expect("write provider model");
+
+        cleanup_provider_gateway_profile_model_overrides(&profile_dir).expect("cleanup overrides");
+
+        assert!(!profile_dir.join(CODEX_PROVIDER_MODEL_CATALOG_FILE).exists());
+        assert!(!profile_dir.join(CODEX_PROVIDER_MODEL_BACKUP_FILE).exists());
+        let config =
+            fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
+        assert!(!config.contains("model_catalog_json"));
+        assert!(!config.contains("model = \"deepseek-v4-pro\""));
+        assert!(config.contains("model = \"gpt-5.5\""));
+
+        let _ = fs::remove_dir_all(&profile_dir);
+    }
+
+    #[test]
+    fn provider_gateway_cleanup_restores_previous_model_without_catalog_file() {
+        let profile_dir = std::env::temp_dir().join(format!(
+            "cockpit-provider-model-restore-no-catalog-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&profile_dir).expect("create temp profile");
+
+        write_local_access_profile_model_override(&profile_dir, "gpt-5.5")
+            .expect("write official model");
+        backup_current_profile_model_before_provider_gateway(
+            &profile_dir,
+            &[
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ],
+        )
+        .expect("backup official model");
+        write_local_access_profile_model_override(&profile_dir, "deepseek-v4-pro")
+            .expect("write provider model");
+
+        let config_path = profile_dir.join(CODEX_PROFILE_CONFIG_FILE);
+        let existing = fs::read_to_string(&config_path).expect("read config");
+        let mut doc = existing.parse::<Document>().expect("parse config");
+        doc["model_catalog_json"] = value(CODEX_PROVIDER_MODEL_CATALOG_FILE);
+        let content = crate::modules::codex_config_format::codex_config_doc_to_string(&mut doc);
+        write_string_atomic(&config_path, &content).expect("write config");
+
+        cleanup_provider_gateway_profile_model_overrides(&profile_dir).expect("cleanup overrides");
+
+        assert!(!profile_dir.join(CODEX_PROVIDER_MODEL_BACKUP_FILE).exists());
+        let config =
+            fs::read_to_string(profile_dir.join(CODEX_PROFILE_CONFIG_FILE)).expect("read config");
+        assert!(!config.contains("model_catalog_json"));
+        assert!(!config.contains("model = \"deepseek-v4-pro\""));
+        assert!(config.contains("model = \"gpt-5.5\""));
+
+        let _ = fs::remove_dir_all(&profile_dir);
     }
 
     #[test]
@@ -17207,6 +18219,8 @@ data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_t
         let api_key = ResolvedLocalApiKey {
             id: "key-1".to_string(),
             label: "Key".to_string(),
+            provider_gateway: None,
+            account_ids: Vec::new(),
             model_prefix: Some("team".to_string()),
             allowed_models: vec!["gpt-*".to_string()],
             excluded_models: vec!["codex-*".to_string()],
@@ -17223,6 +18237,43 @@ data: {"type":"response.completed","response":{"id":"resp_123","usage":{"input_t
         assert!(validate_client_model_visible(
             CODEX_AUTO_REVIEW_MODEL_ID,
             CODEX_AUTO_REVIEW_MODEL_ID,
+            &collection,
+            &api_key,
+            None,
+        ));
+    }
+
+    #[test]
+    fn provider_gateway_models_are_visible_for_gateway_api_key() {
+        let collection = test_local_access_collection(vec!["account-1".to_string()]);
+        let api_key = ResolvedLocalApiKey {
+            id: "provider_gateway_account-1".to_string(),
+            label: "Provider Gateway: DeepSeek".to_string(),
+            provider_gateway: Some(CodexLocalAccessProviderGateway {
+                base_url: "https://api.deepseek.com/v1".to_string(),
+                api_key: "sk-test".to_string(),
+                upstream_model: "deepseek-v4-pro".to_string(),
+                upstream_models: vec![
+                    "deepseek-v4-pro".to_string(),
+                    "deepseek-v4-flash".to_string(),
+                ],
+                wire_api: Some("chat_completions".to_string()),
+                supports_vision: false,
+                model_capabilities: HashMap::new(),
+            }),
+            account_ids: vec!["account-1".to_string()],
+            model_prefix: None,
+            allowed_models: Vec::new(),
+            excluded_models: Vec::new(),
+        };
+
+        let models = visible_codex_model_ids_for_api_key(&collection, &api_key, None);
+
+        assert!(models.iter().any(|model| model == "deepseek-v4-pro"));
+        assert!(models.iter().any(|model| model == "deepseek-v4-flash"));
+        assert!(validate_client_model_visible(
+            "deepseek-v4-pro",
+            "deepseek-v4-pro",
             &collection,
             &api_key,
             None,
@@ -18127,6 +19178,8 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
         let api_key = ResolvedLocalApiKey {
             id: "client-key-1".to_string(),
             label: "Client".to_string(),
+            provider_gateway: None,
+            account_ids: Vec::new(),
             model_prefix: None,
             allowed_models: Vec::new(),
             excluded_models: Vec::new(),
@@ -18164,6 +19217,8 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
         let api_key = ResolvedLocalApiKey {
             id: "client-key-1".to_string(),
             label: "Client".to_string(),
+            provider_gateway: None,
+            account_ids: Vec::new(),
             model_prefix: None,
             allowed_models: Vec::new(),
             excluded_models: Vec::new(),
@@ -18237,6 +19292,8 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
         let api_key = ResolvedLocalApiKey {
             id: "client-key-1".to_string(),
             label: "Client".to_string(),
+            provider_gateway: None,
+            account_ids: Vec::new(),
             model_prefix: None,
             allowed_models: Vec::new(),
             excluded_models: Vec::new(),
@@ -18371,6 +19428,7 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
             Some("https://relay.example/v1".to_string()),
             Some("relay".to_string()),
             Some("Relay".to_string()),
+            Vec::new(),
         );
 
         assert!(is_local_access_eligible_account(&account, true));
@@ -18390,6 +19448,7 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
             Some("https://relay.example/v1".to_string()),
             Some("relay".to_string()),
             Some("Relay".to_string()),
+            Vec::new(),
         );
         let http_account = CodexAccount::new_api_key(
             "api-2".to_string(),
@@ -18399,6 +19458,7 @@ data: {"error":{"code":"server_error","type":"upstream","message":"stream aborte
             Some("http://127.0.0.1:8080/v1".to_string()),
             Some("local".to_string()),
             Some("Local".to_string()),
+            Vec::new(),
         );
 
         assert_eq!(
