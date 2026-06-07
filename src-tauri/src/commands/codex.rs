@@ -12,9 +12,9 @@ use crate::models::codex_local_access::{
     CodexLocalAccessTimeouts, CodexLocalAccessUsageEventPage,
 };
 use crate::modules::{
-    account, codex_account, codex_local_access, codex_oauth, codex_quota,
-    codex_session_visibility, codex_speed, codex_wakeup, codex_wakeup_scheduler, config, logger,
-    openclaw_auth, opencode_auth, process,
+    account, codex_account, codex_local_access, codex_oauth, codex_quota, codex_session_visibility,
+    codex_speed, codex_wakeup, codex_wakeup_scheduler, config, logger, openclaw_auth,
+    opencode_auth, process,
 };
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -511,6 +511,39 @@ pub async fn import_codex_from_files(
     })
 }
 
+#[tauri::command]
+pub fn start_codex_batch_import_from_files(
+    app: AppHandle,
+    file_paths: Vec<String>,
+) -> Result<codex_account::CodexBatchImportStartResult, String> {
+    codex_account::start_codex_batch_import_from_files(app, file_paths)
+}
+
+#[tauri::command]
+pub fn cancel_codex_batch_import(session_id: String) -> Result<(), String> {
+    codex_account::cancel_codex_batch_import(&session_id)
+}
+
+#[tauri::command]
+pub fn resume_codex_batch_import(app: AppHandle, session_id: String) -> Result<(), String> {
+    codex_account::resume_codex_batch_import(app, &session_id)
+}
+
+#[tauri::command]
+pub fn get_codex_batch_import_preview(
+    session_id: String,
+) -> Result<codex_account::CodexBatchImportPreview, String> {
+    codex_account::get_codex_batch_import_preview(&session_id)
+}
+
+#[tauri::command]
+pub fn confirm_codex_batch_import(
+    session_id: String,
+    item_ids: Vec<String>,
+) -> Result<codex_account::CodexBatchImportConfirmResult, String> {
+    codex_account::confirm_codex_batch_import(&session_id, &item_ids)
+}
+
 /// 刷新单个账号配额
 #[tauri::command]
 pub async fn refresh_codex_quota(app: AppHandle, account_id: String) -> Result<CodexQuota, String> {
@@ -692,6 +725,7 @@ pub fn add_codex_account_with_api_key(
     api_wire_api: Option<String>,
     api_supports_vision: Option<bool>,
     api_model_vision_support: Option<std::collections::HashMap<String, bool>>,
+    api_vision_routing_model: Option<String>,
     account_name: Option<String>,
 ) -> Result<CodexAccount, String> {
     let account = codex_account::upsert_api_key_account(
@@ -704,6 +738,7 @@ pub fn add_codex_account_with_api_key(
         api_wire_api,
         api_supports_vision.unwrap_or(false),
         api_model_vision_support.unwrap_or_default(),
+        api_vision_routing_model,
         account_name,
     )?;
     codex_account::load_account(&account.id).ok_or_else(|| "账号保存后无法读取".to_string())
@@ -726,6 +761,7 @@ pub fn update_codex_api_key_credentials(
     api_wire_api: Option<String>,
     api_supports_vision: Option<bool>,
     api_model_vision_support: Option<std::collections::HashMap<String, bool>>,
+    api_vision_routing_model: Option<String>,
 ) -> Result<CodexAccount, String> {
     codex_account::update_api_key_credentials(
         &account_id,
@@ -738,6 +774,7 @@ pub fn update_codex_api_key_credentials(
         api_wire_api,
         api_supports_vision.unwrap_or(false),
         api_model_vision_support.unwrap_or_default(),
+        api_vision_routing_model,
     )
 }
 
@@ -1219,7 +1256,7 @@ fn summarize_model_provider_usage(
 
     CodexModelProviderUsageSummary {
         mode: json_string_at(body, &["mode"]),
-        is_valid: json_bool_at(body, &["isValid"]),
+        is_valid: json_bool_at(body, &["is_active"]).or_else(|| json_bool_at(body, &["isValid"])),
         status: json_string_at(body, &["status"]),
         plan_name: json_string_at(body, &["planName"]),
         remaining: json_f64_at(body, &["remaining"]),
