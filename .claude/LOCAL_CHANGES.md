@@ -21,6 +21,7 @@ These commits describe the current local customization set relative to `origin/m
 - `79b8b6a feat: 优化导入性能、添加导入进度显示、拆分异常筛选`
 - `bdb9d75 optimize account batch deletion`
 - Codex import quota refresh concurrency optimization in `src-tauri/src/commands/codex.rs`
+- Codex external batch import confirmation should collect per-item failures instead of aborting the whole batch.
 
 ## Watched files
 
@@ -60,6 +61,7 @@ Watched files:
 Behavior to preserve:
 
 - Codex JSON/token batch import should not fail the entire batch when one item fails.
+- Codex external/file batch import confirmation should not fail the entire batch when one selected item fails during account save or quota writeback.
 - Failed import items should be skipped and collected into user-visible failure messages.
 - Import progress is emitted through `codex:json-import-progress`.
 - Frontend import UI shows `current/total` progress.
@@ -76,6 +78,7 @@ Symbols and strings to watch:
 - `import_codex_candidate`
 - `import_accounts_from_token_lines`
 - `import_from_json`
+- `confirm_codex_batch_import`
 - `refresh_imported_codex_accounts`
 - `codex:json-import-progress`
 - `hydrateMissingProfiles`

@@ -6160,14 +6160,13 @@ pub fn confirm_codex_batch_import(
                 tokens,
                 account_id_hint,
                 account_note,
-            } => {
-                let mut account = upsert_account_with_hints(tokens, account_id_hint, None)?;
+            } => upsert_account_with_hints(tokens, account_id_hint, None).and_then(|mut account| {
                 if account_note.is_some() {
                     account.account_note = account_note;
                     save_account(&account)?;
                 }
                 Ok(account)
-            }
+            }),
             CodexBatchImportDraft::AccessToken {
                 access_token,
                 account_note,
@@ -6179,7 +6178,13 @@ pub fn confirm_codex_batch_import(
                     account.quota = Some(quota);
                     account.quota_error = None;
                     account.usage_updated_at = Some(chrono::Utc::now().timestamp());
-                    save_account(&account)?;
+                    if let Err(error) = save_account(&account) {
+                        failed.push(CodexFileImportFailure {
+                            email: cached.preview.label,
+                            error,
+                        });
+                        continue;
+                    }
                 }
                 imported.push(account);
             }
