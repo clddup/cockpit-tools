@@ -14,27 +14,19 @@ This file records fork-specific behavior maintained on `develop/clddup` so upstr
 
 ## Current custom commits
 
-These commits describe the current local customization set relative to `origin/main` at the time this file was created:
+These commits describe the current local customization set relative to the latest upstream release baseline:
 
-- `c9d71fc feat: codex导入不阻塞`
-- `eff496d fix: 修复构建错误 - 对齐 tauri 版本并修复变量名`
-- `79b8b6a feat: 优化导入性能、添加导入进度显示、拆分异常筛选`
 - `bdb9d75 optimize account batch deletion`
-- Codex import quota refresh concurrency optimization in `src-tauri/src/commands/codex.rs`
-- Codex external batch import confirmation should collect per-item failures instead of aborting the whole batch.
+- Codex JSON/token batch import should skip per-item failures instead of aborting the entire batch.
+- Codex abnormal account filters are split into `AUTH_ERROR`, `QUOTA_ERROR`, and `REFRESH_FAILED`.
 
 ## Watched files
 
 When syncing upstream, compare upstream-changed files against this list first:
 
-- `Cargo.lock`
-- `docs/PROJECT_ANALYSIS.md`
-- `package.json`
-- `pnpm-lock.yaml`
-- `src-tauri/src/commands/codex.rs`
+- `src-tauri/src/modules/codex_account.rs`
 - `src-tauri/src/modules/codebuddy_account.rs`
 - `src-tauri/src/modules/codebuddy_cn_account.rs`
-- `src-tauri/src/modules/codex_account.rs`
 - `src-tauri/src/modules/cursor_account.rs`
 - `src-tauri/src/modules/gemini_account.rs`
 - `src-tauri/src/modules/github_copilot_account.rs`
@@ -45,45 +37,27 @@ When syncing upstream, compare upstream-changed files against this list first:
 - `src-tauri/src/modules/workbuddy_account.rs`
 - `src-tauri/src/modules/zed_account.rs`
 - `src/pages/CodexAccountsPage.tsx`
-- `src/stores/useCodexAccountStore.ts`
 
 ## Custom behavior areas
 
-### Codex import performance, partial success, and progress
+### Codex import partial success
 
 Watched files:
 
 - `src-tauri/src/modules/codex_account.rs`
-- `src-tauri/src/commands/codex.rs`
-- `src/pages/CodexAccountsPage.tsx`
-- `src/stores/useCodexAccountStore.ts`
 
 Behavior to preserve:
 
 - Codex JSON/token batch import should not fail the entire batch when one item fails.
-- Codex external/file batch import confirmation should not fail the entire batch when one selected item fails during account save or quota writeback.
 - Failed import items should be skipped and collected into user-visible failure messages.
-- Import progress is emitted through `codex:json-import-progress`.
-- Frontend import UI shows `current/total` progress.
-- Refresh phase shows quota refresh progress.
-- Imported Codex OAuth accounts are prepared with bounded concurrency and then persisted through a single indexed batch path.
-- Imported Codex OAuth accounts refresh quotas with bounded concurrency instead of one-by-one serial refresh.
-- API Key accounts are preserved without quota refresh during the import refresh phase.
-- Imported account order is preserved after concurrent refresh.
-- Codex profile hydration runs concurrently with a concurrency limit.
-- Codex profile hydrate updates are buffered and flushed in batches to reduce frequent state updates.
 
 Symbols and strings to watch:
 
 - `import_codex_candidate`
 - `import_accounts_from_token_lines`
 - `import_from_json`
-- `confirm_codex_batch_import`
-- `refresh_imported_codex_accounts`
 - `codex:json-import-progress`
-- `hydrateMissingProfiles`
-- `CODEX_PROFILE_HYDRATE_BUFFER`
-- `CODEX_PROFILE_HYDRATE_FLUSH_INTERVAL_MS`
+- `跳过失败项`
 
 ### Codex abnormal account filters
 
@@ -147,19 +121,6 @@ Symbols and strings to watch:
 - `HashSet<String>`
 - `bound_oauth_account_id`
 - `current_account_id`
-
-### Tauri dependency alignment
-
-Watched files:
-
-- `package.json`
-- `pnpm-lock.yaml`
-- `Cargo.lock`
-
-Behavior to preserve:
-
-- `@tauri-apps/api` is aligned to `^2.11.0`.
-- Lockfiles should remain consistent with dependency changes.
 
 ## Merge impact checklist
 

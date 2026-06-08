@@ -3,8 +3,8 @@ use crate::models::codex::{
     CodexAuthFile, CodexAuthMode, CodexAuthTokens, CodexJwtPayload, CodexQuickConfig, CodexTokens,
 };
 use crate::modules::{account, codex_oauth, logger};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
 #[cfg(target_os = "macos")]
 #[cfg(all(target_os = "macos", not(test)))]
 use sha2::{Digest, Sha256};
@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use toml_edit::{Document, value};
+use toml_edit::{value, Document};
 
 static CODEX_QUOTA_ALERT_LAST_SENT: std::sync::LazyLock<Mutex<HashMap<String, i64>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -6210,13 +6210,14 @@ pub fn confirm_codex_batch_import(
                 tokens,
                 account_id_hint,
                 account_note,
-            } => upsert_account_with_hints(tokens, account_id_hint, None).and_then(|mut account| {
+            } => {
+                let mut account = upsert_account_with_hints(tokens, account_id_hint, None)?;
                 if account_note.is_some() {
                     account.account_note = account_note;
                     save_account(&account)?;
                 }
                 Ok(account)
-            }),
+            }
             CodexBatchImportDraft::AccessToken {
                 access_token,
                 account_note,
@@ -6228,13 +6229,7 @@ pub fn confirm_codex_batch_import(
                     account.quota = Some(quota);
                     account.quota_error = None;
                     account.usage_updated_at = Some(chrono::Utc::now().timestamp());
-                    if let Err(error) = save_account(&account) {
-                        failed.push(CodexFileImportFailure {
-                            email: cached.preview.label,
-                            error,
-                        });
-                        continue;
-                    }
+                    save_account(&account)?;
                 }
                 imported.push(account);
             }
@@ -6377,26 +6372,26 @@ fn extract_codex_tokens_from_value(
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiProviderConfig, CODEX_AUTO_COMPACT_DEFAULT_LIMIT, CODEX_CONTEXT_WINDOW_1M_VALUE,
-        CodexAccountIndex, CodexAccountSummary, CodexAuthFile, CodexAuthTokens,
-        CodexJsonImportCandidate, LocalCodexOAuthSnapshot, build_account_storage_id,
-        build_auth_file_value, decode_jwt_payload_value, detect_auth_file_plan_type_from_path,
-        ensure_managed_account_fresh, extract_codex_import_candidate_from_value,
-        extract_codex_tokens_from_value, extract_user_info, format_refresh_error_for_user,
-        get_accounts_dir, get_accounts_storage_path, get_current_account_from_loaded,
-        is_managed_auth_refresh_due, list_accounts_checked,
-        load_account, load_account_index, looks_like_sub2api_export, parse_auth_file_last_refresh,
-        parse_codex_account_compat, parse_line_delimited_json_values,
+        build_account_storage_id, build_auth_file_value, decode_jwt_payload_value,
+        detect_auth_file_plan_type_from_path, ensure_managed_account_fresh,
+        extract_codex_import_candidate_from_value, extract_codex_tokens_from_value,
+        extract_user_info, format_refresh_error_for_user, get_accounts_dir,
+        get_accounts_storage_path, get_current_account_from_loaded, is_managed_auth_refresh_due,
+        list_accounts_checked, load_account, load_account_index, looks_like_sub2api_export,
+        parse_auth_file_last_refresh, parse_codex_account_compat, parse_line_delimited_json_values,
         read_api_provider_from_config_toml, read_quick_config_from_config_toml,
         resolve_api_provider_config, save_account, save_account_index,
         should_accept_authority_snapshot, sync_account_from_auth_dir,
         sync_managed_projection_from_auth_dir, upsert_account, upsert_account_from_access_token,
         upsert_account_from_auth_tokens, validate_api_key_credentials, write_account_bundle_to_dir,
         write_api_key_provider_to_config_toml, write_api_provider_to_config_toml,
-        write_managed_projection_to_dir, write_quick_config_to_config_toml,
+        write_managed_projection_to_dir, write_quick_config_to_config_toml, ApiProviderConfig,
+        CodexAccountIndex, CodexAccountSummary, CodexAuthFile, CodexAuthTokens,
+        CodexJsonImportCandidate, LocalCodexOAuthSnapshot, CODEX_AUTO_COMPACT_DEFAULT_LIMIT,
+        CODEX_CONTEXT_WINDOW_1M_VALUE,
     };
     use crate::models::codex::{CodexAccount, CodexApiProviderMode, CodexTokens};
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use std::fs;
     use std::path::Path;
     use std::sync::{LazyLock, Mutex};
@@ -8788,8 +8783,8 @@ pub fn pick_auto_switch_target_if_needed() -> Result<Option<CodexAccount>, Strin
     result
 }
 
-pub fn run_quota_alert_if_needed()
--> Result<Option<crate::modules::account::QuotaAlertPayload>, String> {
+pub fn run_quota_alert_if_needed(
+) -> Result<Option<crate::modules::account::QuotaAlertPayload>, String> {
     let cfg = crate::modules::config::get_user_config();
     if !cfg.codex_quota_alert_enabled {
         return Ok(None);

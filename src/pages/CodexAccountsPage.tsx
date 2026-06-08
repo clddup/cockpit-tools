@@ -4349,25 +4349,7 @@ export function CodexAccountsPage() {
     }
     page.setAddStatus("loading");
     page.setAddMessage(t("common.shared.token.importing", "正在导入..."));
-    let unlistenProgress: UnlistenFn | undefined;
     try {
-      unlistenProgress = await listen<{ current: number; total: number; label?: string; phase?: string }>(
-        "codex:json-import-progress",
-        (event) => {
-          const { current, total, phase } = event.payload;
-          if (phase === "refresh") {
-            page.setAddMessage(
-              t("common.shared.token.importing", "正在导入...") +
-                ` ${t("codex.import.refreshing", "刷新配额")} (${current}/${total})`,
-            );
-          } else {
-            page.setAddMessage(
-              t("common.shared.token.importing", "正在导入...") +
-                ` (${current}/${total})`,
-            );
-          }
-        },
-      );
       const imported = await codexService.importCodexFromJson(trimmed);
       await fetchAccounts();
       if (imported.length > 0) {
@@ -4394,8 +4376,6 @@ export function CodexAccountsPage() {
           String(e).replace(/^Error:\s*/, ""),
         ),
       );
-    } finally {
-      unlistenProgress?.();
     }
   };
 
