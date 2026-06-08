@@ -7,6 +7,18 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ---
+## [0.25.3] - 2026-06-07
+
+### 修复
+- **Codex Chat Completions 供应商改为实例级独立本地网关**：配置为 Chat Completions 的 API Key 账号会为目标 Codex profile 启动专属 provider gateway，并使用独立本地端口，避免与全局 API 服务网关或其他 Codex 实例互相冲突。
+- **Codex 默认实例进程匹配对齐官方客户端启动形态**：默认桌面实例识别不再要求 `CODEX_HOME` 或受管 profile 目录，提升官方默认实例的启动状态、停止行为、PID 跟踪和窗口定位准确性。
+- **Codex config.toml 清理不再误删用户管理的供应商配置**：Cockpit 现在只移除自身写入的 provider gateway 模型目录和模型覆盖，保留外部 `model_catalog_json`、自定义 provider 以及其他用户配置。
+- **Windows provider gateway 后台 sidecar 不再弹出可见控制台窗口**：Codex 供应商网关启动的后台 sidecar 会继续使用隐藏控制台窗口的启动方式。
+
+### 变更
+- **APIKEY.FUN 供应商配置保持 Responses 直连模式**：APIKEY.FUN 赞助模板和已保存的 APIKEY.FUN 供应商会使用 Responses 协议，不再走 Chat Completions 网关路径。
+
+---
 ## [0.25.2] - 2026-06-06
 
 ### 新增

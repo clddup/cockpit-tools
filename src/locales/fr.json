@@ -281,6 +281,7 @@
     "sidebarToggle": "Afficher dans la barre latérale",
     "dashboardToggle": "Afficher dans le tableau de bord",
     "trayToggle": "Afficher dans la zone de notification",
+    "apiRelayTrayDisabled": "Le relais ne peut pas encore s’afficher dans la zone de notification",
     "hiddenBadge": "Masqué",
     "openFromMore": "Gérer la disposition des plateformes",
     "dragHandleLabel": "Glisser pour réorganiser",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Tableau de bord des comptes",
+    "apiRelay": {
+      "localConfig": "Configuration locale",
+      "localConfigDesc": "Gérez les réglages locaux du relais, la vérification API Key et la configuration rapide du client.",
+      "status": "État config",
+      "enabledByConfig": "Activé par la configuration distante",
+      "openLocalConfig": "Ouvrir la config locale"
+    },
     "summary": {
       "label": "Aperçu",
       "title": "Instantané des comptes",

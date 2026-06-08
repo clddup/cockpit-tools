@@ -281,6 +281,7 @@
     "sidebarToggle": "サイドバーに表示",
     "dashboardToggle": "ダッシュボードに表示",
     "trayToggle": "トレイに表示",
+    "apiRelayTrayDisabled": "リレーはまだトレイに表示できません",
     "hiddenBadge": "非表示",
     "openFromMore": "プラットフォームレイアウトを管理",
     "dragHandleLabel": "ドラッグして並び替え",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "アカウントダッシュボード",
+    "apiRelay": {
+      "localConfig": "ローカル設定",
+      "localConfigDesc": "ローカルリレー設定、API Key 照会、クライアントのワンクリック設定を管理します。",
+      "status": "設定状態",
+      "enabledByConfig": "リモート設定で有効",
+      "openLocalConfig": "ローカル設定を開く"
+    },
     "summary": {
       "label": "概要",
       "title": "アカウントスナップショット",

@@ -1,5 +1,8 @@
 {
   "version": "1.0",
+  "forceRefreshVersions": [
+    "0.25.3"
+  ],
   "topRightAd_backup": null,
   "topRightAd": {
     "id": "top-right-ad-2026-04-shop",
@@ -29,7 +32,7 @@
   "topRightAds": [
     {
       "id": "top-right-ad-2026-04-shop",
-      "enabled": false,
+      "enabled": true,
       "priority": 100,
       "text": "Codex Plus代过试用，成品号，Gemini给自己账号订阅一年Pro 需要的了解一下",
       "badge": "推广",
@@ -50,7 +53,7 @@
     },
     {
       "id": "top-right-ad-local-carousel-test",
-      "enabled": true,
+      "enabled": false,
       "relayRelated": true,
       "priority": 90,
       "text": "Cockpit 官方中转站 APIKEY.FUN，统一接入主流模型，点击专属注册享充值优惠",
@@ -120,7 +123,7 @@
           "enabled": true,
           "type": "sub2api",
           "baseUrl": "https://api.apikey.fun/v1",
-          "wireApi": "chat_completions",
+          "wireApi": "responses",
           "quickConfigure": true,
           "dashboardCard": true,
           "models": [],

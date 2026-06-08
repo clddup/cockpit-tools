@@ -281,6 +281,7 @@
     "sidebarToggle": "Hiển thị ở thanh bên",
     "dashboardToggle": "Hiển thị trên bảng điều khiển",
     "trayToggle": "Hiển thị trên khay hệ thống",
+    "apiRelayTrayDisabled": "Trạm relay chưa thể hiển thị trên khay hệ thống",
     "hiddenBadge": "Ẩn",
     "openFromMore": "Quản lý bố cục nền tảng",
     "dragHandleLabel": "Kéo để sắp xếp lại",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Bảng điều khiển tài khoản",
+    "apiRelay": {
+      "localConfig": "Cấu hình cục bộ",
+      "localConfigDesc": "Quản lý cấu hình relay cục bộ, tra cứu API Key và thiết lập nhanh ứng dụng khách.",
+      "status": "Trạng thái cấu hình",
+      "enabledByConfig": "Đã bật bởi cấu hình từ xa",
+      "openLocalConfig": "Mở cấu hình cục bộ"
+    },
     "summary": {
       "label": "Tổng quan",
       "title": "Ảnh chụp tài khoản",

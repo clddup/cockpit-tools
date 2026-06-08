@@ -334,6 +334,7 @@
     "sidebarToggle": "Tampilkan di bilah sisi",
     "dashboardToggle": "Tampilkan di dasbor",
     "trayToggle": "Tampilkan di tray",
+    "apiRelayTrayDisabled": "Relay belum dapat tampil di tray",
     "groupDefault": "Platform bawaan",
     "groupName": "Nama grup",
     "groupNamePlaceholder": "Contoh: CodeBuddy Suite",
@@ -3126,6 +3127,13 @@
   },
   "dashboard": {
     "title": "Dasbor Akun",
+    "apiRelay": {
+      "localConfig": "Konfigurasi lokal",
+      "localConfigDesc": "Kelola setelan relay lokal, pengecekan API Key, dan penyiapan klien sekali klik.",
+      "status": "Status konfigurasi",
+      "enabledByConfig": "Diaktifkan oleh konfigurasi remote",
+      "openLocalConfig": "Buka konfigurasi lokal"
+    },
     "summary": {
       "label": "Ringkasan",
       "title": "Snapshot Akun",

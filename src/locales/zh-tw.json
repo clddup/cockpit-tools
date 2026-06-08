@@ -281,6 +281,7 @@
     "sidebarToggle": "側邊欄顯示",
     "dashboardToggle": "儀表板顯示",
     "trayToggle": "選單列顯示",
+    "apiRelayTrayDisabled": "中轉站暫不支援選單列顯示",
     "hiddenBadge": "已隱藏",
     "openFromMore": "管理平台佈局",
     "dragHandleLabel": "拖曳排序",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "帳號儀表板",
+    "apiRelay": {
+      "localConfig": "本機設定",
+      "localConfigDesc": "管理本機中轉站設定、API Key 查詢與一鍵寫入用戶端入口。",
+      "status": "設定狀態",
+      "enabledByConfig": "遠端設定已開啟",
+      "openLocalConfig": "開啟本機設定頁"
+    },
     "summary": {
       "label": "總覽",
       "title": "帳號快照",

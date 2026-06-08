@@ -281,6 +281,7 @@
     "sidebarToggle": "Zobrazit v postranním panelu",
     "dashboardToggle": "Zobrazit na nástěnce",
     "trayToggle": "Zobrazit v systémové liště",
+    "apiRelayTrayDisabled": "Relay zatím nelze zobrazit v systémové liště",
     "hiddenBadge": "Skryto",
     "openFromMore": "Spravovat rozložení platforem",
     "dragHandleLabel": "Přetažením změnit pořadí",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Přehled účtů",
+    "apiRelay": {
+      "localConfig": "Místní konfigurace",
+      "localConfigDesc": "Spravujte místní nastavení relay, kontrolu API klíče a rychlé nastavení klienta.",
+      "status": "Stav konfigurace",
+      "enabledByConfig": "Povoleno vzdálenou konfigurací",
+      "openLocalConfig": "Otevřít místní konfiguraci"
+    },
     "summary": {
       "label": "Přehled",
       "title": "Snímek účtů",

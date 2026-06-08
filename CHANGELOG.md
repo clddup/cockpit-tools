@@ -7,6 +7,18 @@ All notable changes to Cockpit Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
+## [0.25.3] - 2026-06-07
+
+### Fixed
+- **Codex Chat Completions providers now use isolated local gateways per instance**: API Key accounts configured for Chat Completions start a dedicated provider gateway for the target Codex profile with its own local port, avoiding conflicts with the global API Service gateway or other Codex instances.
+- **Codex default-instance process matching now follows the official client launch shape**: the default desktop instance is detected without requiring `CODEX_HOME` or a managed profile directory, improving launch state, stop behavior, PID tracking, and window focus for the official default instance.
+- **Codex config.toml cleanup no longer removes user-managed provider settings**: Cockpit now only removes its own provider-gateway model catalog and model override, preserving external `model_catalog_json`, custom providers, and other user configuration.
+- **Windows provider-gateway sidecars no longer open visible console windows**: background sidecars launched for Codex provider gateways keep the Windows hidden-console startup behavior.
+
+### Changed
+- **APIKEY.FUN provider configuration now stays on Responses direct mode**: sponsored APIKEY.FUN templates and existing saved APIKEY.FUN providers use Responses instead of the Chat Completions gateway path.
+
+---
 ## [0.25.2] - 2026-06-06
 
 ### Added

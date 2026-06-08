@@ -748,10 +748,6 @@ function MainApp() {
     };
   }, [fetchSponsorModuleState, fetchTopRightAdState]);
 
-  const openSponsorPage = useCallback(() => {
-    setPage('api-relay');
-  }, []);
-
   useEffect(() => {
     if (sponsorModuleInitialized && page === 'api-relay' && !sponsorEntryVisible) {
       setPage('dashboard');
@@ -3176,7 +3172,6 @@ function MainApp() {
         onUpdateActionClick={handleQuickUpdateActionClick}
         updateRemindersEnabled={updateRemindersEnabled}
         sponsorEntryVisible={sponsorEntryVisible}
-        onOpenSponsorLink={openSponsorPage}
         onOpenLogViewer={() => setShowLogViewer(true)}
       />
 

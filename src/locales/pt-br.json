@@ -281,6 +281,7 @@
     "sidebarToggle": "Mostrar na barra lateral",
     "dashboardToggle": "Mostrar no painel",
     "trayToggle": "Mostrar na bandeja",
+    "apiRelayTrayDisabled": "O relay ainda não pode aparecer na bandeja",
     "hiddenBadge": "Oculto",
     "openFromMore": "Gerenciar layout de plataformas",
     "dragHandleLabel": "Arrastar para reordenar",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Painel de contas",
+    "apiRelay": {
+      "localConfig": "Configuração local",
+      "localConfigDesc": "Gerencie ajustes locais do relay, consulta de API Key e configuração rápida do cliente.",
+      "status": "Status da configuração",
+      "enabledByConfig": "Ativado pela configuração remota",
+      "openLocalConfig": "Abrir configuração local"
+    },
     "summary": {
       "label": "Visão geral",
       "title": "Resumo das contas",

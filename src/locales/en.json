@@ -397,7 +397,7 @@
       "envTitle": "Environment",
       "envDesc": "Reference for OpenAI-compatible entries such as Claude Code, Gemini CLI, and Hermes.",
       "curlTitle": "API Script",
-      "curlDesc": "Quickly verify a Chat Completions compatible request."
+      "curlDesc": "Quickly verify a Responses-compatible request."
     },
     "docTool": {
       "codex": "Can be written directly into Codex Provider.",
@@ -459,6 +459,7 @@
     "sidebarToggle": "Show in sidebar",
     "dashboardToggle": "Show in dashboard",
     "trayToggle": "Show in tray",
+    "apiRelayTrayDisabled": "Relay cannot be shown in the tray yet",
     "groupDefault": "Default platform",
     "groupName": "Group name",
     "groupNamePlaceholder": "Example: CodeBuddy Suite",
@@ -3251,6 +3252,13 @@
   },
   "dashboard": {
     "title": "Account Dashboard",
+    "apiRelay": {
+      "localConfig": "Local config",
+      "localConfigDesc": "Manage local relay settings, API key lookup, and one-click client setup.",
+      "status": "Config status",
+      "enabledByConfig": "Enabled by remote config",
+      "openLocalConfig": "Open local config"
+    },
     "summary": {
       "label": "Overview",
       "title": "Account Snapshot",

@@ -6,6 +6,8 @@ import apiKeyFunIcon from '../../assets/icons/apikey-fun.png';
 import { Page } from '../../types/navigation';
 import { isMenuVisiblePlatform, PlatformId, PLATFORM_PAGE_MAP } from '../../types/platform';
 import {
+  API_RELAY_LAYOUT_ENTRY_ID,
+  ApiRelayLayoutEntryId,
   resolveGroupChildIcon,
   resolveGroupChildName,
   parseGroupEntryId,
@@ -34,7 +36,6 @@ interface SideNavProps {
   onUpdateActionClick: () => void;
   updateRemindersEnabled: boolean;
   sponsorEntryVisible: boolean;
-  onOpenSponsorLink: () => void;
   onOpenLogViewer: () => void;
 }
 
@@ -43,11 +44,14 @@ interface FlyingRocket {
   x: number;
 }
 
+type SideNavEntryId = PlatformLayoutEntryId | ApiRelayLayoutEntryId;
+
 interface SideNavEntry {
-  id: PlatformLayoutEntryId;
+  id: SideNavEntryId;
+  kind: 'platform' | 'api-relay';
   label: string;
   hidden: boolean;
-  targetPlatformId: PlatformId;
+  targetPlatformId: PlatformId | null;
   platformIds: PlatformId[];
   group: PlatformLayoutGroup | null;
 }
@@ -77,6 +81,18 @@ const CLASSIC_NAV_SCALE_EPSILON = 0.004;
 const CLASSIC_NAV_SCROLL_EPSILON = 4;
 
 function renderEntryIcon(entry: SideNavEntry, size: number) {
+  if (entry.kind === 'api-relay') {
+    return (
+      <img
+        className="nav-item-icon"
+        src={apiKeyFunIcon}
+        alt=""
+        width={size}
+        height={size}
+      />
+    );
+  }
+
   if (entry.group && entry.group.iconKind === 'custom' && entry.group.iconCustomDataUrl) {
     return (
       <img
@@ -90,10 +106,10 @@ function renderEntryIcon(entry: SideNavEntry, size: number) {
 
   if (entry.group) {
     const iconPlatform = entry.group.iconPlatformId ?? entry.targetPlatformId;
-    return renderPlatformIcon(iconPlatform, size);
+    return iconPlatform ? renderPlatformIcon(iconPlatform, size) : null;
   }
 
-  return renderPlatformIcon(entry.targetPlatformId, size);
+  return entry.targetPlatformId ? renderPlatformIcon(entry.targetPlatformId, size) : null;
 }
 
 export function SideNav({
@@ -108,7 +124,6 @@ export function SideNav({
   onUpdateActionClick,
   updateRemindersEnabled,
   sponsorEntryVisible,
-  onOpenSponsorLink,
   onOpenLogViewer,
 }: SideNavProps) {
   const { t } = useTranslation();
@@ -148,23 +163,31 @@ export function SideNav({
     hiddenEntryIds,
     sidebarEntryIds,
     platformGroups,
+    apiRelaySidebarVisible,
+    apiRelayEntryOrder,
   } = usePlatformLayoutStore();
 
   const antigravityRuntimeTarget = useAntigravityRuntimeTarget();
   const currentPlatformId = page === 'overview'
     ? antigravityRuntimeTarget
     : PAGE_PLATFORM_MAP[page] ?? null;
-  const currentEntryId = useMemo(
-    () => (currentPlatformId ? resolveEntryIdForPlatform(currentPlatformId, platformGroups) : null),
-    [currentPlatformId, platformGroups],
+  const currentEntryId = useMemo<SideNavEntryId | null>(
+    () => {
+      if (page === 'api-relay') {
+        return API_RELAY_LAYOUT_ENTRY_ID;
+      }
+      return currentPlatformId ? resolveEntryIdForPlatform(currentPlatformId, platformGroups) : null;
+    },
+    [currentPlatformId, page, platformGroups],
   );
 
   const hiddenSet = useMemo(() => new Set(hiddenEntryIds), [hiddenEntryIds]);
   const sidebarSet = useMemo(() => new Set(sidebarEntryIds), [sidebarEntryIds]);
+  const apiRelayEntryVisible = sponsorEntryVisible && apiRelaySidebarVisible;
 
   const orderedEntries = useMemo<SideNavEntry[]>(() => {
-    return orderedEntryIds
-      .map((entryId) => {
+    const platformEntries: SideNavEntry[] = orderedEntryIds
+      .map<SideNavEntry | null>((entryId) => {
         const platformId = parsePlatformEntryId(entryId);
         if (platformId) {
           if (!isMenuVisiblePlatform(platformId)) {
@@ -172,6 +195,7 @@ export function SideNav({
           }
           return {
             id: entryId,
+            kind: 'platform' as const,
             label: getPlatformLabel(platformId, t),
             hidden: hiddenSet.has(entryId),
             targetPlatformId: platformId,
@@ -205,6 +229,7 @@ export function SideNav({
 
         return {
           id: entryId,
+          kind: 'platform' as const,
           label: group.name,
           hidden: hiddenSet.has(entryId),
           targetPlatformId,
@@ -213,10 +238,29 @@ export function SideNav({
         };
       })
       .filter((entry): entry is SideNavEntry => !!entry);
-  }, [orderedEntryIds, platformGroups, hiddenSet, t]);
+
+    if (!apiRelayEntryVisible) {
+      return platformEntries;
+    }
+
+    const result = [...platformEntries];
+    const insertIndex = Math.max(0, Math.min(apiRelayEntryOrder, result.length));
+    result.splice(insertIndex, 0, {
+      id: API_RELAY_LAYOUT_ENTRY_ID,
+      kind: 'api-relay',
+      label: t('nav.apiRelay', '中转站'),
+      hidden: false,
+      targetPlatformId: null,
+      platformIds: [],
+      group: null,
+    });
+    return result;
+  }, [apiRelayEntryOrder, apiRelayEntryVisible, orderedEntryIds, platformGroups, hiddenSet, t]);
 
   const sidebarVisibleEntries = useMemo(
-    () => orderedEntries.filter((entry) => sidebarSet.has(entry.id)),
+    () => orderedEntries.filter((entry) =>
+      entry.kind === 'api-relay' || sidebarSet.has(entry.id as PlatformLayoutEntryId),
+    ),
     [orderedEntries, sidebarSet],
   );
 
@@ -234,6 +278,16 @@ export function SideNav({
     setPage(PLATFORM_PAGE_MAP[platformId]);
   }, [setPage]);
 
+  const navigateToEntry = useCallback((entry: SideNavEntry) => {
+    if (entry.kind === 'api-relay') {
+      setPage('api-relay');
+      return;
+    }
+    if (entry.targetPlatformId) {
+      navigateToPlatform(entry.targetPlatformId);
+    }
+  }, [navigateToPlatform, setPage]);
+
   const classicScaleContentKey = useMemo(
     () => sidebarMenuEntries
       .map((entry) => `${entry.id}:${entry.platformIds.join(',')}`)
@@ -247,7 +301,11 @@ export function SideNav({
   );
 
   const sidebarMenuPlatformIdSet = useMemo(
-    () => new Set(sidebarMenuEntries.map((entry) => entry.targetPlatformId)),
+    () => new Set(
+      sidebarMenuEntries
+        .map((entry) => entry.targetPlatformId)
+        .filter((platformId): platformId is PlatformId => !!platformId),
+    ),
     [sidebarMenuEntries],
   );
 
@@ -259,13 +317,16 @@ export function SideNav({
 
       return orderedEntries
         .map((entry) => {
+          if (entry.kind === 'api-relay') {
+            return sidebarMenuEntryIdSet.has(entry.id) ? null : entry;
+          }
           const remainingPlatformIds = entry.platformIds.filter(
             (platformId) => !sidebarMenuPlatformIdSet.has(platformId),
           );
           if (remainingPlatformIds.length === 0) {
             return null;
           }
-          const resolvedTargetPlatformId = remainingPlatformIds.includes(entry.targetPlatformId)
+          const resolvedTargetPlatformId = entry.targetPlatformId && remainingPlatformIds.includes(entry.targetPlatformId)
             ? entry.targetPlatformId
             : remainingPlatformIds[0];
           return {
@@ -662,9 +723,11 @@ export function SideNav({
       <div className="side-nav-more-title">{t('nav.morePlatforms', '更多平台')}</div>
       <div className="side-nav-more-list">
         {moreMenuEntries.map((entry) => {
-          const active = isClassicLayout
+          const active = entry.kind === 'api-relay'
             ? currentEntryId === entry.id
-            : !!currentPlatformId && entry.platformIds.includes(currentPlatformId);
+            : isClassicLayout
+              ? currentEntryId === entry.id
+              : !!currentPlatformId && entry.platformIds.includes(currentPlatformId);
           const showGroupParent =
             !entry.group || !sidebarMenuEntryIdSet.has(entry.id);
           return (
@@ -673,7 +736,7 @@ export function SideNav({
                 <button
                   className={`side-nav-more-item ${active ? 'active' : ''}`}
                   onClick={() => {
-                    navigateToPlatform(entry.targetPlatformId);
+                    navigateToEntry(entry);
                     setShowMore(false);
                   }}
                 >
@@ -852,34 +915,13 @@ export function SideNav({
           ) : null}
         </button>
 
-        {sponsorEntryVisible ? (
-          <button
-            className={`nav-item ${page === 'api-relay' && !shouldLockActiveOnMore ? 'active' : ''}`}
-            onClick={onOpenSponsorLink}
-            title={t('nav.apiRelay', '中转站')}
-          >
-            <img
-              className="nav-item-icon"
-              src={apiKeyFunIcon}
-              alt=""
-              width={isClassicLayout ? classicMainIconSize : 20}
-              height={isClassicLayout ? classicMainIconSize : 20}
-            />
-            {showClassicLabels ? (
-              <span className="nav-item-text">{t('nav.apiRelay', '中转站')}</span>
-            ) : !isClassicLayout ? (
-              <span className="tooltip">{t('nav.apiRelay', '中转站')}</span>
-            ) : null}
-          </button>
-        ) : null}
-
         {sidebarMenuEntries.map((entry) => {
           const active = currentEntryId === entry.id && !shouldLockActiveOnMore;
           return (
             <button
               key={entry.id}
               className={`nav-item ${active ? 'active' : ''}`}
-              onClick={() => navigateToPlatform(entry.targetPlatformId)}
+              onClick={() => navigateToEntry(entry)}
               title={entry.label}
             >
               {renderEntryIcon(entry, isClassicLayout ? classicMainIconSize : 20)}

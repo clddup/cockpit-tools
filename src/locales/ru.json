@@ -281,6 +281,7 @@
     "sidebarToggle": "Показывать в боковой панели",
     "dashboardToggle": "Показывать на панели",
     "trayToggle": "Показывать в трее",
+    "apiRelayTrayDisabled": "Relay пока нельзя показывать в трее",
     "hiddenBadge": "Скрыто",
     "openFromMore": "Управление макетом платформ",
     "dragHandleLabel": "Перетащите для изменения порядка",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Панель аккаунтов",
+    "apiRelay": {
+      "localConfig": "Локальная настройка",
+      "localConfigDesc": "Управляйте локальным relay, проверкой API Key и быстрой настройкой клиента.",
+      "status": "Статус настройки",
+      "enabledByConfig": "Включено удалённой конфигурацией",
+      "openLocalConfig": "Открыть локальную настройку"
+    },
     "summary": {
       "label": "Обзор",
       "title": "Сводка аккаунтов",

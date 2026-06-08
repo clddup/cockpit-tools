@@ -327,6 +327,7 @@
     "sidebarToggle": "إظهار في الشريط الجانبي",
     "dashboardToggle": "إظهار في لوحة المعلومات",
     "trayToggle": "إظهار في شريط النظام",
+    "apiRelayTrayDisabled": "لا يمكن عرض Relay في شريط النظام بعد",
     "hiddenBadge": "مخفي",
     "openFromMore": "إدارة تخطيط المنصات",
     "dragHandleLabel": "اسحب لإعادة الترتيب",
@@ -3026,6 +3027,13 @@
   },
   "dashboard": {
     "title": "لوحة حسابات",
+    "apiRelay": {
+      "localConfig": "إعداد محلي",
+      "localConfigDesc": "إدارة إعدادات relay المحلية، وفحص API Key، وإعداد العميل بنقرة واحدة.",
+      "status": "حالة الإعداد",
+      "enabledByConfig": "مفعّل من الإعداد البعيد",
+      "openLocalConfig": "فتح الإعداد المحلي"
+    },
     "summary": {
       "label": "نظرة عامة",
       "title": "لمحة عن الحسابات",

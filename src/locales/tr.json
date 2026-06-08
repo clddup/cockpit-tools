@@ -281,6 +281,7 @@
     "sidebarToggle": "Kenar çubuğunda göster",
     "dashboardToggle": "Panoda göster",
     "trayToggle": "Tepside göster",
+    "apiRelayTrayDisabled": "Relay henüz tepside gösterilemez",
     "hiddenBadge": "Gizli",
     "openFromMore": "Platform düzenini yönet",
     "dragHandleLabel": "Sürükleyerek sırala",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Hesap Gösterge Paneli",
+    "apiRelay": {
+      "localConfig": "Yerel yapılandırma",
+      "localConfigDesc": "Yerel relay ayarlarını, API Key sorgusunu ve tek tıkla istemci kurulumunu yönetin.",
+      "status": "Yapılandırma durumu",
+      "enabledByConfig": "Uzak yapılandırma ile etkin",
+      "openLocalConfig": "Yerel yapılandırmayı aç"
+    },
     "summary": {
       "label": "Genel Bakış",
       "title": "Hesap Anlık Görüntüsü",

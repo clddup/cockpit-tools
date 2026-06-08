@@ -281,6 +281,7 @@
     "sidebarToggle": "Pokaż na pasku bocznym",
     "dashboardToggle": "Pokaż na pulpicie",
     "trayToggle": "Pokaż w zasobniku",
+    "apiRelayTrayDisabled": "Relay nie może jeszcze być widoczny w zasobniku",
     "hiddenBadge": "Ukryte",
     "openFromMore": "Zarządzaj układem platform",
     "dragHandleLabel": "Przeciągnij, aby zmienić kolejność",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "Panel kont",
+    "apiRelay": {
+      "localConfig": "Konfiguracja lokalna",
+      "localConfigDesc": "Zarządzaj lokalnym relay, sprawdzaniem API Key i szybką konfiguracją klienta.",
+      "status": "Stan konfiguracji",
+      "enabledByConfig": "Włączone przez zdalną konfigurację",
+      "openLocalConfig": "Otwórz konfigurację lokalną"
+    },
     "summary": {
       "label": "Przegląd",
       "title": "Zrzut kont",

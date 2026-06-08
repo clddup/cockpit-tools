@@ -281,6 +281,7 @@
     "sidebarToggle": "사이드바에 표시",
     "dashboardToggle": "대시보드에 표시",
     "trayToggle": "트레이에 표시",
+    "apiRelayTrayDisabled": "릴레이는 아직 트레이에 표시할 수 없습니다",
     "hiddenBadge": "숨김",
     "openFromMore": "플랫폼 레이아웃 관리",
     "dragHandleLabel": "드래그하여 순서 변경",
@@ -2980,6 +2981,13 @@
   },
   "dashboard": {
     "title": "계정 대시보드",
+    "apiRelay": {
+      "localConfig": "로컬 설정",
+      "localConfigDesc": "로컬 릴레이 설정, API Key 조회, 클라이언트 원클릭 설정을 관리합니다.",
+      "status": "설정 상태",
+      "enabledByConfig": "원격 설정으로 활성화됨",
+      "openLocalConfig": "로컬 설정 열기"
+    },
     "summary": {
       "label": "개요",
       "title": "계정 스냅샷",
