@@ -996,7 +996,12 @@
       },
       "errors": {
         "notEnabled": "Сначала включите синхронизацию WebDAV"
-      }
+      },
+      "retentionTitle": "Remote Retention Days",
+      "retentionDesc": "Backups older than this on the cloud will be removed during the next sync.",
+      "retentionUnit": "days",
+      "collapseAll": "Collapse remote backups",
+      "expandAll": "Expand all remote backups ({{count}} more)"
     }
   },
   "appPath": {
@@ -1759,6 +1764,7 @@
         "freeNotice": "Бесплатные аккаунты пока не поддерживаются. Бесплатные аккаунты выбрать нельзя.",
         "freeUnsupported": "Бесплатные аккаунты пока не поддерживаются.",
         "restrictFreeToggle": "Ограничить Free-аккаунты",
+        "chatApiKeyUnsupported": "Chat Completions не поддерживается",
         "freeNoticeRestricted": "Free-аккаунты ограничены. Отключите это, чтобы их выбирать.",
         "freeNoticeUnstable": "Прокси Free-аккаунтов может быть нестабильным. Используйте с осторожностью.",
         "restrictFreeDisableConfirmTitle": "Разрешить Free-аккаунты",
@@ -4390,7 +4396,7 @@
   "apiKeyFun": {
     "eyebrow": "Шлюз",
     "title": "Relay APIKEY.FUN",
-    "description": "Официальный relay Cockpit предоставляет стабильный, открытый и выгодный API-доступ к большим моделям. Поддерживаются Claude, OpenAI, Gemini и другие основные модели; сервис подходит для единой настройки в Codex, Gemini CLI, Claude Code и других инструментах разработки. При регистрации по эксклюзивной ссылке Cockpit можно получить постоянную скидку до 5% на пополнения.",
+    "description": "Официальный партнерский relay Cockpit предоставляет стабильный, открытый и выгодный API-доступ к большим моделям. Поддерживаются Claude, OpenAI, Gemini и другие основные модели; сервис подходит для единой настройки в Codex, Gemini CLI, Claude Code и других инструментах разработки. При регистрации по эксклюзивной ссылке Cockpit можно получить постоянную скидку до 5% на пополнения.",
     "register": "Эксклюзивная ссылка",
     "docs": "Официальная документация",
     "viewNow": "Смотреть",

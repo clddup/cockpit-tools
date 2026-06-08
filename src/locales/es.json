@@ -996,7 +996,12 @@
       },
       "errors": {
         "notEnabled": "Primero active la sincronización WebDAV"
-      }
+      },
+      "retentionTitle": "Remote Retention Days",
+      "retentionDesc": "Backups older than this on the cloud will be removed during the next sync.",
+      "retentionUnit": "days",
+      "collapseAll": "Collapse remote backups",
+      "expandAll": "Expand all remote backups ({{count}} more)"
     }
   },
   "appPath": {
@@ -1759,6 +1764,7 @@
         "freeNotice": "Las cuentas gratuitas aún no son compatibles. No se pueden seleccionar cuentas gratuitas.",
         "freeUnsupported": "Las cuentas gratuitas aún no son compatibles",
         "restrictFreeToggle": "Limitar cuentas Free",
+        "chatApiKeyUnsupported": "Chat Completions no compatible",
         "freeNoticeRestricted": "Las cuentas Free están limitadas. Desactiva esto para seleccionarlas.",
         "freeNoticeUnstable": "El proxy de cuentas Free puede ser inestable. Úsalo con cuidado.",
         "restrictFreeDisableConfirmTitle": "Permitir cuentas Free",
@@ -4390,7 +4396,7 @@
   "apiKeyFun": {
     "eyebrow": "Intermediario",
     "title": "Relay APIKEY.FUN",
-    "description": "El relay oficial de Cockpit ofrece acceso API estable, abierto y rentable a grandes modelos. Admite modelos principales como Claude, OpenAI y Gemini, y es adecuado para una configuración unificada en Codex, Gemini CLI, Claude Code y otras herramientas de desarrollo. Al registrarte mediante el enlace exclusivo de Cockpit, puedes obtener un descuento permanente de hasta el 5% en recargas.",
+    "description": "El relay socio oficial de Cockpit ofrece acceso API estable, abierto y rentable a grandes modelos. Admite modelos principales como Claude, OpenAI y Gemini, y es adecuado para una configuración unificada en Codex, Gemini CLI, Claude Code y otras herramientas de desarrollo. Al registrarte mediante el enlace exclusivo de Cockpit, puedes obtener un descuento permanente de hasta el 5% en recargas.",
     "register": "Enlace exclusivo",
     "docs": "Docs oficiales",
     "viewNow": "Ver ahora",
