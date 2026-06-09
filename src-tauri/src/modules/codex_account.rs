@@ -5455,6 +5455,7 @@ pub struct CodexBatchImportItem {
 pub struct CodexBatchImportProgress {
     pub session_id: String,
     pub phase: String,
+    pub check_quota: bool,
     pub current: usize,
     pub total: usize,
     pub success: usize,
@@ -5469,6 +5470,7 @@ pub struct CodexBatchImportProgress {
 pub struct CodexBatchImportPreview {
     pub session_id: String,
     pub status: String,
+    pub check_quota: bool,
     pub total: usize,
     pub items: Vec<CodexBatchImportItem>,
 }
@@ -5483,6 +5485,7 @@ pub struct CodexBatchImportConfirmResult {
 #[derive(Clone)]
 struct CodexBatchImportSession {
     status: String,
+    check_quota: bool,
     cancel: Arc<AtomicBool>,
     source_items: Vec<CodexBatchImportSourceItem>,
     next_index: usize,
@@ -5548,6 +5551,7 @@ fn codex_batch_import_preview_from_session(
     CodexBatchImportPreview {
         session_id: session_id.to_string(),
         status: session.status.clone(),
+        check_quota: session.check_quota,
         total: session.total,
         items: session
             .items
@@ -5560,6 +5564,7 @@ fn codex_batch_import_preview_from_session(
 fn codex_batch_import_progress_from_items(
     session_id: &str,
     phase: &str,
+    check_quota: bool,
     current: usize,
     total: usize,
     items: &[CodexBatchImportCachedItem],
@@ -5568,6 +5573,7 @@ fn codex_batch_import_progress_from_items(
     CodexBatchImportProgress {
         session_id: session_id.to_string(),
         phase: phase.to_string(),
+        check_quota,
         current,
         total,
         success: items
@@ -5897,6 +5903,7 @@ async fn build_codex_batch_import_item(
     index: usize,
     source: String,
     value: serde_json::Value,
+    check_quota: bool,
 ) -> CodexBatchImportCachedItem {
     let item_id = format!("{}-item-{}", session_id, index + 1);
     let draft = match codex_batch_import_draft_from_value(value).await {
@@ -5974,17 +5981,24 @@ async fn build_codex_batch_import_item(
     };
 
     let existing = load_account(&account.id).is_some();
-    let quota_result = crate::modules::codex_quota::probe_import_account_quota(&account).await;
-    let (quota_status, quota_error, quota) = match quota_result {
-        Ok(quota) => ("success".to_string(), None, Some(quota)),
-        Err(error) => ("failed".to_string(), Some(error), None),
-    };
-    let status = if quota_status == "failed" {
-        "quota_failed".to_string()
+    let (quota_status, quota_error, quota, status) = if check_quota {
+        let quota_result = crate::modules::codex_quota::probe_import_account_quota(&account).await;
+        let (quota_status, quota_error, quota) = match quota_result {
+            Ok(quota) => ("success".to_string(), None, Some(quota)),
+            Err(error) => ("failed".to_string(), Some(error), None),
+        };
+        let status = if quota_status == "failed" {
+            "quota_failed".to_string()
+        } else if existing {
+            "existing".to_string()
+        } else {
+            "ready".to_string()
+        };
+        (quota_status, quota_error, quota, status)
     } else if existing {
-        "existing".to_string()
+        ("skipped".to_string(), None, None, "existing".to_string())
     } else {
-        "ready".to_string()
+        ("skipped".to_string(), None, None, "ready".to_string())
     };
     let default_selected = status == "ready" || status == "existing";
     CodexBatchImportCachedItem {
@@ -6020,6 +6034,7 @@ async fn run_codex_batch_import_scan(
     app: tauri::AppHandle,
     session_id: String,
     file_paths: Vec<String>,
+    check_quota: bool,
 ) {
     let cancel = {
         let sessions = CODEX_BATCH_IMPORT_SESSIONS.lock().unwrap();
@@ -6101,13 +6116,14 @@ async fn run_codex_batch_import_scan(
             session.next_index = 0;
             session.total = total;
             session.items = read_failures;
+            session.check_quota = check_quota;
         }
     }
     run_codex_batch_import_resume(app, session_id).await;
 }
 
 async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String) {
-    let (cancel, source_items, start_index, mut items, total) = {
+    let (cancel, check_quota, source_items, start_index, mut items, total) = {
         let mut sessions = CODEX_BATCH_IMPORT_SESSIONS.lock().unwrap();
         let Some(session) = sessions.get_mut(&session_id) else {
             return;
@@ -6116,6 +6132,7 @@ async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String
         session.status = "scanning".to_string();
         (
             session.cancel.clone(),
+            session.check_quota,
             session.source_items.clone(),
             session.next_index,
             session.items.clone(),
@@ -6128,6 +6145,7 @@ async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String
         codex_batch_import_progress_from_items(
             &session_id,
             "scanning",
+            check_quota,
             items.len(),
             total,
             &items,
@@ -6144,6 +6162,7 @@ async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String
             index,
             source_item.source,
             source_item.value,
+            check_quota,
         )
         .await;
         let current_label = Some(cached.preview.label.clone());
@@ -6160,6 +6179,7 @@ async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String
             codex_batch_import_progress_from_items(
                 &session_id,
                 "scanning",
+                check_quota,
                 items.len(),
                 total,
                 &items,
@@ -6197,6 +6217,7 @@ async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String
                 .entry(session_id.clone())
                 .or_insert_with(|| CodexBatchImportSession {
                     status: status.to_string(),
+                    check_quota,
                     cancel: cancel.clone(),
                     source_items: Vec::new(),
                     next_index: 0,
@@ -6213,6 +6234,7 @@ async fn run_codex_batch_import_resume(app: tauri::AppHandle, session_id: String
 pub fn start_codex_batch_import_from_files(
     app: tauri::AppHandle,
     file_paths: Vec<String>,
+    check_quota: bool,
 ) -> Result<CodexBatchImportStartResult, String> {
     if file_paths.is_empty() {
         return Err("未选择任何文件".to_string());
@@ -6226,6 +6248,7 @@ pub fn start_codex_batch_import_from_files(
             session_id.clone(),
             CodexBatchImportSession {
                 status: "scanning".to_string(),
+                check_quota,
                 cancel,
                 source_items: Vec::new(),
                 next_index: 0,
@@ -6236,7 +6259,7 @@ pub fn start_codex_batch_import_from_files(
     }
     let task_session_id = session_id.clone();
     tauri::async_runtime::spawn(async move {
-        run_codex_batch_import_scan(app, task_session_id, file_paths).await;
+        run_codex_batch_import_scan(app, task_session_id, file_paths, check_quota).await;
     });
     Ok(CodexBatchImportStartResult { session_id })
 }
