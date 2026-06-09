@@ -4922,6 +4922,7 @@ async fn import_codex_candidates_concurrently(
     progress_label: Option<&str>,
 ) -> Result<Vec<CodexAccount>, String> {
     use futures::future::join_all;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::sync::Semaphore;
 
@@ -4932,14 +4933,26 @@ async fn import_codex_candidates_concurrently(
     }
 
     let semaphore = Arc::new(Semaphore::new(MAX_IMPORT_PREPARE_CONCURRENT));
+    // 并发准备阶段是真正耗时的部分（网络请求）。用原子计数器在每个任务完成时
+    // emit 一次真实递进进度，而不是等全部完成后再瞬间跳到 100%。
+    let completed = Arc::new(AtomicUsize::new(0));
+    let progress_label_owned = progress_label.map(|label| label.to_string());
     let tasks: Vec<_> = pending
         .into_iter()
         .map(|candidate| {
             let semaphore = semaphore.clone();
+            let completed = completed.clone();
+            let progress_label_owned = progress_label_owned.clone();
             async move {
                 let _permit = match semaphore.acquire_owned().await {
                     Ok(permit) => permit,
                     Err(error) => {
+                        let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                        emit_json_import_progress(
+                            done,
+                            progress_total,
+                            progress_label_owned.as_deref(),
+                        );
                         return (
                             candidate.position,
                             candidate.label,
@@ -4947,7 +4960,10 @@ async fn import_codex_candidates_concurrently(
                         );
                     }
                 };
-                prepare_codex_import_candidate(candidate).await
+                let result = prepare_codex_import_candidate(candidate).await;
+                let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                emit_json_import_progress(done, progress_total, progress_label_owned.as_deref());
+                result
             }
         })
         .collect();
@@ -4960,8 +4976,7 @@ async fn import_codex_candidates_concurrently(
 
     let mut prepared_candidates = Vec::new();
 
-    for (index, (position, label, result)) in prepared.into_iter().enumerate() {
-        emit_json_import_progress(index + 1, progress_total, progress_label);
+    for (_position, label, result) in prepared.into_iter() {
         match result {
             Ok(candidate) => prepared_candidates.push(LabeledPreparedCodexJsonImportCandidate {
                 label,
@@ -4973,8 +4988,6 @@ async fn import_codex_candidates_concurrently(
                 failures.push(message);
             }
         }
-
-        let _ = position;
     }
 
     let (imported, batch_failures) =

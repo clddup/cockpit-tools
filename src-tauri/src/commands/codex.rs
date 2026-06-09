@@ -377,6 +377,12 @@ async fn refresh_imported_codex_accounts(
     let mut result = Vec::with_capacity(accounts.len());
     let mut success_count = 0;
     let mut attempted = false;
+    // 仅统计需要刷新配额的 OAuth 账号，api_key 账号不参与进度计数。
+    let refresh_total = accounts
+        .iter()
+        .filter(|account| !account.is_api_key_auth())
+        .count();
+    let mut refreshed = 0;
 
     for account in accounts {
         if account.is_api_key_auth() {
@@ -385,6 +391,18 @@ async fn refresh_imported_codex_accounts(
         }
 
         attempted = true;
+        refreshed += 1;
+        {
+            use tauri::Emitter;
+            let _ = app.emit(
+                "codex:json-import-progress",
+                serde_json::json!({
+                    "current": refreshed,
+                    "total": refresh_total,
+                    "phase": "refresh",
+                }),
+            );
+        }
         match codex_quota::refresh_account_quota(&account.id).await {
             Ok(_) => {
                 success_count += 1;

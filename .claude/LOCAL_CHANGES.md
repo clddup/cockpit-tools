@@ -63,6 +63,36 @@ Symbols and strings to watch:
 - `跳过失败项`
 - `跳过落盘失败项`
 
+### Codex import progress display + concurrency
+
+Originally introduced in commit `79b8b6a` (feat: 优化导入性能、添加导入进度显示、拆分异常筛选). Lost during the v0.25.6 upstream sync merge conflict and restored. These are easy to drop on the next sync because upstream refactored the import path to be concurrent.
+
+Watched files:
+
+- `src-tauri/src/modules/codex_account.rs`
+- `src-tauri/src/commands/codex.rs`
+- `src/pages/CodexAccountsPage.tsx`
+- `src/stores/useCodexAccountStore.ts`
+
+Behavior to preserve:
+
+- Backend emits `codex:json-import-progress` events during JSON/token import. Because the prepare stage is concurrent (`Semaphore(5)`), progress must be emitted from INSIDE each concurrent task (via an `AtomicUsize` counter), NOT after `join_all` completes — otherwise the progress bar jumps straight to 100%.
+- After import, `refresh_imported_codex_accounts` (in `commands/codex.rs`) emits `codex:json-import-progress` with `"phase": "refresh"` for each OAuth account whose quota is refreshed (api_key accounts are excluded from the count).
+- Frontend `handleTokenImport` listens to `codex:json-import-progress` and shows `(current/total)` in the import message; on `phase === "refresh"` it shows the "刷新配额" label. The listener is cleaned up in a `finally` block.
+- Store `hydrateAccountProfilesIfNeeded` (in `useCodexAccountStore.ts`) refreshes account profiles with 5-way concurrency (worker-pool `runNext` pattern) and buffers updates, flushing to the UI every 500ms plus a final flush after all complete. This reduces re-renders while keeping the list visibly updating. Do NOT let it revert to a serial for-loop with per-account `set()`.
+
+Symbols and strings to watch:
+
+- `emit_json_import_progress`
+- `codex:json-import-progress`
+- `"phase": "refresh"` / `phase === "refresh"`
+- `import_codex_candidates_concurrently`
+- `refresh_imported_codex_accounts`
+- `CODEX_PROFILE_HYDRATE_BUFFER`
+- `CODEX_PROFILE_HYDRATE_FLUSH_INTERVAL_MS`
+- `CODEX_PROFILE_HYDRATE_CONCURRENCY`
+- `unlistenProgress`
+
 ### Codex abnormal account filters
 
 Watched files:
