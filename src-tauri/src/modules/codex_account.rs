@@ -4290,6 +4290,11 @@ enum PreparedCodexJsonImportCandidate {
     },
 }
 
+struct LabeledPreparedCodexJsonImportCandidate {
+    label: String,
+    candidate: PreparedCodexJsonImportCandidate,
+}
+
 fn extract_account_note_from_value(value: &serde_json::Value) -> Option<String> {
     let obj = value.as_object()?;
     [
@@ -4866,13 +4871,14 @@ fn upsert_access_token_account_in_index(
 }
 
 fn import_prepared_codex_candidates_batch(
-    candidates: Vec<PreparedCodexJsonImportCandidate>,
-) -> Result<Vec<CodexAccount>, String> {
+    candidates: Vec<LabeledPreparedCodexJsonImportCandidate>,
+) -> (Vec<CodexAccount>, Vec<String>) {
     let mut index = load_account_index();
     let mut accounts = Vec::with_capacity(candidates.len());
+    let mut failures = Vec::new();
 
-    for candidate in candidates {
-        let account = match candidate {
+    for LabeledPreparedCodexJsonImportCandidate { label, candidate } in candidates {
+        let result = match candidate {
             PreparedCodexJsonImportCandidate::FullToken {
                 tokens,
                 account_id_hint,
@@ -4883,17 +4889,31 @@ fn import_prepared_codex_candidates_batch(
                 account_id_hint,
                 None,
                 account_note,
-            )?,
+            ),
             PreparedCodexJsonImportCandidate::AccessToken {
                 access_token,
                 account_note,
-            } => upsert_access_token_account_in_index(&mut index, access_token, account_note)?,
+            } => upsert_access_token_account_in_index(&mut index, access_token, account_note),
         };
-        accounts.push(account);
+        match result {
+            Ok(account) => accounts.push(account),
+            Err(error) => {
+                let message = format!("第 {} 个 token 导入失败: {}", label, error);
+                logger::log_warn(&format!("Codex 批量 token 导入跳过落盘失败项: {}", message));
+                failures.push(message);
+            }
+        }
     }
 
-    save_account_index(&index)?;
-    Ok(accounts)
+    if !accounts.is_empty() {
+        if let Err(error) = save_account_index(&index) {
+            logger::log_warn(&format!("Codex 批量 token 导入落盘索引失败: {}", error));
+            failures.push(error);
+            return (Vec::new(), failures);
+        }
+    }
+
+    (accounts, failures)
 }
 
 async fn import_codex_candidates_concurrently(
@@ -4943,7 +4963,10 @@ async fn import_codex_candidates_concurrently(
     for (index, (position, label, result)) in prepared.into_iter().enumerate() {
         emit_json_import_progress(index + 1, progress_total, progress_label);
         match result {
-            Ok(candidate) => prepared_candidates.push(candidate),
+            Ok(candidate) => prepared_candidates.push(LabeledPreparedCodexJsonImportCandidate {
+                label,
+                candidate,
+            }),
             Err(error) => {
                 let message = format!("第 {} 个 token 导入失败: {}", label, error);
                 logger::log_warn(&format!("Codex 批量 token 导入跳过失败项: {}", message));
@@ -4954,13 +4977,10 @@ async fn import_codex_candidates_concurrently(
         let _ = position;
     }
 
-    match import_prepared_codex_candidates_batch(prepared_candidates) {
-        Ok(imported) => accounts.extend(imported),
-        Err(error) => {
-            logger::log_warn(&format!("Codex 批量 token 导入落盘失败: {}", error));
-            failures.push(error);
-        }
-    }
+    let (imported, batch_failures) =
+        import_prepared_codex_candidates_batch(prepared_candidates);
+    accounts.extend(imported);
+    failures.extend(batch_failures);
 
     if accounts.is_empty() {
         return Err(if failures.is_empty() {

@@ -50,14 +50,18 @@ Behavior to preserve:
 
 - Codex JSON/token batch import should not fail the entire batch when one item fails.
 - Failed import items should be skipped and collected into user-visible failure messages.
+- The persist stage (`import_prepared_codex_candidates_batch`) must also skip per-item failures (e.g. invalid JWT id_token) instead of aborting the whole batch with `?`; it returns `(accounts, failures)` and only saves the index when at least one account succeeded.
 
 Symbols and strings to watch:
 
 - `import_codex_candidate`
 - `import_accounts_from_token_lines`
 - `import_from_json`
+- `import_prepared_codex_candidates_batch`
+- `LabeledPreparedCodexJsonImportCandidate`
 - `codex:json-import-progress`
 - `跳过失败项`
+- `跳过落盘失败项`
 
 ### Codex abnormal account filters
 
