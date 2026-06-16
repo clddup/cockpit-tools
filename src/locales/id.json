@@ -204,7 +204,7 @@
         "planEndsInHours": "Direset dalam {{hours}} jam"
       },
       "flowNotice": {
-        "alternative": "Isolasi multi-instansi: gunakan profil --user-data-dir yang berbeda dan masuk sekali per instansi untuk beralih lingkungan akun dengan cepat."
+        "alternative": "Isolasi multi-instansi: gunakan profil terkelola terpisah dan masuk sekali per instansi untuk cepat berpindah lingkungan akun."
       },
       "injecting": "Menyuntikkan...",
       "usage": {
@@ -307,7 +307,8 @@
     "switchClassicLayoutDontAskAgain": "Jangan tampilkan pesan ini lagi",
     "switchClassicLayoutConfirm": "Beralih sekarang",
     "2faManager": "2FA​",
-    "apiRelay": "Relay API"
+    "apiRelay": "Relay API",
+    "claude": "Claude"
   },
   "sponsors": {
     "pageTitle": "Sponsor",
@@ -824,7 +825,10 @@
       "codexAppSpeedFast": "Cepat",
       "codexAppSpeedLaunch": "Mulai ulang Codex",
       "codexAppSpeedSaveFailed": "Gagal menyimpan kecepatan Codex: {{error}}",
-      "codexAppSpeedLaunchFailed": "Gagal memulai ulang Codex: {{error}}"
+      "codexAppSpeedLaunchFailed": "Gagal memulai ulang Codex: {{error}}",
+      "claudeSettingsTitle": "Pengaturan Claude Desktop",
+      "claudeAutoRefresh": "Penyegaran otomatis kuota Claude Desktop",
+      "claudeAutoRefreshDesc": "Menyegarkan cache kuota akun Claude Desktop secara otomatis di latar belakang."
     },
     "network": {
       "apiTitle": "API Antigravity Cockpit",
@@ -1308,7 +1312,10 @@
     "switchSuccess": "Berhasil beralih",
     "switched": "Beralih ke {{email}}",
     "tagButton": "Edit Tag",
-    "tagUpdated": "Tag diperbarui"
+    "tagUpdated": "Tag diperbarui",
+    "plan": {
+      "personal": "Pribadi"
+    }
   },
   "overview": {
     "title": "Ringkasan",
@@ -2434,7 +2441,7 @@
     },
     "sessionManager": {
       "title": "Manajer Sesi",
-      "desc": "Sinkronisasi dan pembersihan ada di sini bersama: gunakan tindakan atas untuk menyinkronkan ke semua instansi, lalu perluas setiap proyek untuk meninjau dan menghapus sesi.",
+      "desc": "Sinkronisasi, perbaikan visibilitas, pembersihan, dan pemulihan ada di sini: gunakan aksi atas untuk menyinkronkan sesi, memperbaiki visibilitas, atau memulihkan dari Sampah; lalu buka tiap proyek untuk meninjau dan membuang sesi.",
       "actions": {
         "moveToTrash": "Pindahkan ke Sampah",
         "syncSessions": "Sinkronkan Sesi",
@@ -2443,13 +2450,15 @@
         "repairVisibility": "Perbaiki visibilitas",
         "restoreSessions": "Pulihkan sesi",
         "copySessionId": "Salin ID sesi",
+        "selectAllSessions": "Pilih semua sesi",
+        "clearSelectedSessions": "Batal pilih",
         "copyToInstance": "Salin ke instans"
       },
       "confirm": {
         "title": "Pindahkan ke Sampah",
         "message": "Sesi yang dipilih akan dipindahkan ke Sampah dari instansinya sehingga dapat dipulihkan nanti. Instansi yang berjalan mungkin perlu dimulai ulang sebelum perubahan muncul. Lanjutkan?",
         "syncMessage": "Thread yang hilang dan data sesinya akan disinkronkan ke semua instansi. Konten yang ada tidak akan ditulis lagi, dan berkas instansi target akan dicadangkan sebelum penulisan terjadi. Lanjutkan?",
-        "repairVisibilityMessage": "Tindakan ini akan memperbaiki metadata penyedia di file rollout dan state_5.sqlite menggunakan model_provider dari config.toml root setiap instance (jika tidak ada, default-nya openai). File yang akan diubah akan dicadangkan sebelum ditulis. Instance yang sedang berjalan mungkin perlu dimulai ulang sebelum perubahan terlihat. Lanjutkan?"
+        "repairVisibilityMessage": "Memperbarui catatan state DB resmi Codex yang mengontrol daftar sesi di bilah samping. File state DB dicadangkan sebelum ditulis."
       },
       "empty": {
         "title": "Tidak ada sesi untuk dikelola",
@@ -2485,6 +2494,62 @@
         "selectedCount": "{{count}} sesi dipilih",
         "existingCount": "{{count}} sudah ada di tujuan",
         "confirm": "Salin sesi"
+      },
+      "repairModal": {
+        "quickTitle": "Perbaiki visibilitas",
+        "quickDesc": "Memperbarui catatan state DB resmi Codex untuk bilah samping.",
+        "deepTitle": "Perbaiki visibilitas",
+        "deepDesc": "Memperbarui catatan state DB resmi Codex untuk bilah samping.",
+        "quickProgressTitle": "Progres perbaikan",
+        "deepProgressTitle": "Progres perbaikan",
+        "running": "Memperbaiki...",
+        "startQuick": "Perbaiki",
+        "startDeep": "Perbaiki",
+        "progress": {
+          "queued": "Memulai tugas perbaikan...",
+          "collectInstances": "Mengumpulkan instance Codex...",
+          "scanInstances": "Menyiapkan pemindaian instance...",
+          "scanInstance": "Memindai {{instance}} ({{current}}/{{total}})...",
+          "backupInstance": "Mencadangkan {{instance}} ({{current}}/{{total}})...",
+          "writeInstance": "Menulis {{instance}} ({{current}}/{{total}})...",
+          "rebuildMetadata": "Menyegarkan status sesi resmi untuk {{instance}}...",
+          "pruneBackups": "Membersihkan cadangan lama...",
+          "done": "Perbaikan selesai",
+          "writeSqliteProvider": "Menulis visibilitas SQLite untuk {{instance}}...",
+          "writeRolloutFiles": "Melewati penulisan file sesi lama...",
+          "writeSqliteTimestamps": "Memperbaiki waktu SQLite untuk {{instance}}...",
+          "writeSessionIndex": "Melewati penulisan indeks lama..."
+        },
+        "targetProvider": "Provider tujuan",
+        "defaultProvider": "Default",
+        "loadingProviders": "Memuat provider...",
+        "noProvider": "Provider tidak ditemukan",
+        "providerLoadFailed": "Gagal memuat kandidat provider: {{error}}",
+        "scopeTitle": "Cakupan sesi",
+        "scopeAll": "Semua sesi",
+        "scopeAllDesc": "Perbaiki {{count}} sesi di daftar saat ini.",
+        "scopeSelected": "Sesi terpilih",
+        "scopeSelectedDesc": "Perbaiki hanya {{count}} sesi terpilih.",
+        "scopeSelectedEmpty": "Pilih sesi di daftar terlebih dahulu.",
+        "providerSource": {
+          "config": "Konfigurasi",
+          "rollout": "Sesi",
+          "sqlite": "Basis SQLite"
+        },
+        "targetInstance": "Instans target",
+        "loadingInstances": "Memuat instans...",
+        "noInstance": "Instans tidak ditemukan",
+        "instanceLoadFailed": "Gagal memuat instans: {{error}}",
+        "defaultInstance": "Instans default",
+        "runningInstance": "Berjalan",
+        "instanceProvider": "Provider saat ini",
+        "instanceScopeTitle": "Cakupan instans",
+        "instanceScopeTarget": "Target saja",
+        "instanceScopeTargetDesc": "Hanya memperbaiki instans terpilih, biasanya lebih cepat.",
+        "instanceScopeAll": "Semua instans",
+        "instanceScopeAllDesc": "Memperbaiki semua instans Codex saat pemulihan bersama.",
+        "progressTitle": "Progres perbaikan",
+        "start": "Perbaiki"
       }
     },
     "modelProviders": {
@@ -2746,15 +2811,17 @@
     },
     "apiSwitchNotice": {
       "title": "Sesi Codex tersembunyi",
-      "message": "Terdeteksi Codex beralih dari {{from}} ke {{to}}. Karena perilaku resmi, sesi yang ada mungkin tidak muncul otomatis setelah beralih langsung antara API dan akun. Visibilitas sesi sedang diperbaiki otomatis; Anda juga dapat memakai Manajemen Sesi > Perbaiki Visibilitas nanti.",
+      "message": "Codex beralih dari {{from}} ke {{to}}. Karena perilaku resmi, sesi yang sudah ada mungkin tidak muncul otomatis setelah jenis perpindahan ini. Visibilitas sesi sedang diperbaiki otomatis; nanti juga bisa diperbaiki manual dari Manajemen Sesi.",
       "repairing": "Memperbaiki visibilitas sesi Codex...",
-      "repairFailed": "Perbaikan otomatis gagal. Anda dapat mencoba lagi nanti dari Manajemen Sesi > Perbaiki Visibilitas.",
+      "repairFailed": "Perbaikan visibilitas gagal. Anda dapat mencoba lagi nanti dari Manajemen sesi.",
       "type": {
         "api": "Mode API",
         "apiKey": "Kunci API",
         "apiService": "Layanan API",
         "account": "Akun"
-      }
+      },
+      "manualMessage": "Perbaiki visibilitas memperbarui catatan state DB resmi Codex yang mengontrol daftar sesi di bilah samping. Ini dipakai untuk memulihkan sesi setelah berpindah antara akun dan API Keys.",
+      "repairFailedWithError": "Perbaikan visibilitas gagal: {{error}}"
     },
     "accountNote": {
       "title": "Catatan Akun",
@@ -3003,6 +3070,13 @@
       "selectAllAccounts": "Pilih semua akun",
       "selectReady": "Pilih akun OK",
       "clearSelection": "Hapus pilihan"
+    },
+    "autoRepairMode": {
+      "label": "Logika perbaikan otomatis",
+      "tooltip": "Pilih logika perbaikan visibilitas sesi saat berpindah",
+      "legacyBefore4eb75d96": "Sebelum 4eb75d96",
+      "legacy4eb75d96": "Logika 4eb75d96",
+      "current": "Logika saat ini"
     }
   },
   "codebuddy": {
@@ -3374,6 +3448,10 @@
       "title": "Simpan Filter",
       "enable": "Ingat filter ringkasan akun (tanpa pencarian)",
       "hint": "Nonaktif secara default. Saat diaktifkan, tiap platform menyimpan filter, tag, dan urutan."
+    },
+    "claudeRefreshInterval": "Muat ulang kuota otomatis",
+    "claude": {
+      "appPath": "Jalur Claude Desktop"
     }
   },
   "quotaAlert": {
@@ -3614,7 +3692,11 @@
       "resetsIn": "Resets in {{relative}}​",
       "resetsSoon": "Resets soon​",
       "resetsUnknown": "Reset time unknown​",
-      "onDemand": "On-Demand​"
+      "onDemand": "On-Demand​",
+      "gemini5h": "5h",
+      "geminiWeekly": "Weekly",
+      "claude5h": "5h",
+      "claudeWeekly": "Weekly"
     },
     "title": "Gemini Cli Account​",
     "instances": {
@@ -4504,6 +4586,16 @@
       "queryFailed": "Gagal cek kuota: {{error}}",
       "saveFailed": "Gagal menulis: {{error}}"
     },
+    "models": {
+      "title": "Model tersedia",
+      "desc": "Dibaca dari endpoint model API Key saat ini dan diteruskan ke Codex atau Claude CLI.",
+      "count": "{{count}} model",
+      "loading": "Memuat",
+      "loadingDesc": "Membaca daftar model dari API Key saat ini...",
+      "empty": "Masukkan API Key untuk membaca model yang tersedia.",
+      "emptyFromKey": "API Key saat ini tidak mengembalikan model.",
+      "queryFailed": "Gagal membaca daftar model: {{error}}"
+    },
     "keyManager": {
       "title": "Kelola kunci",
       "desc": "Simpan API Keys untuk beralih cepat dan memeriksa kuota otomatis.",
@@ -4516,9 +4608,202 @@
       "editAlias": "Edit alias​",
       "renamePlaceholder": "Enter alias...​",
       "createdAt": "Ditambahkan {{time}}",
-      "saveFlash": "Baru disimpan"
+      "saveFlash": "Baru disimpan",
+      "addingToCodex": "Menambahkan ke Codex...",
+      "addedToCodex": "Ditambahkan ke Codex",
+      "addToCodexFailed": "Gagal tambah ke Codex: {{error}}",
+      "addingToClaude": "Menambahkan ke Claude CLI...",
+      "addedToClaude": "Ditambahkan ke Claude CLI",
+      "addToClaudeFailed": "Gagal tambah ke Claude CLI: {{error}}",
+      "codexAdded": "Codex ditambahkan",
+      "claudeAdded": "Claude ditambahkan",
+      "addToCodex": "Tambah ke Codex",
+      "addToClaude": "Tambah ke Claude CLI",
+      "codexShort": "Codex",
+      "claudeShort": "Claude CLI"
     },
     "copyKey": "Copy Key​",
     "clearKey": "Clear input​"
+  },
+  "claude": {
+    "import": {
+      "localSuccess": "Mengimpor {{count}} sesi masuk Claude Desktop lokal",
+      "localClient": "Impor Desktop saat ini",
+      "jsonLabel": "Data JSON",
+      "jsonPlaceholder": "Tempel JSON akun Claude yang diekspor",
+      "localDesc": "Membaca status masuk Claude Desktop resmi saat ini dan menyalinnya sebagai snapshot akun lokal di alat ini.",
+      "desktopJsonPlaceholder": "Tempel JSON akun Claude Desktop yang diekspor",
+      "cliJsonPlaceholder": "Tempel JSON akun Claude CLI yang diekspor"
+    },
+    "deleteCurrentDisabled": "Akun saat ini tidak dapat dihapus",
+    "flowNotice": {
+      "title": "Catatan akun Claude",
+      "desc": "Alat ini mengelola status masuk Claude Desktop dan Anthropic API Key. Masuk Desktop selesai di jendela otorisasi platform ini dan disimpan lokal terlebih dahulu; baru ditulis ke Claude Desktop resmi saat mengganti akun.",
+      "permission": "Cakupan izin: baca/tulis direktori data aplikasi Claude Desktop resmi. API Key dan snapshot Desktop disimpan dalam data akun lokal alat ini.",
+      "network": "Cakupan jaringan: jendela masuk Desktop membuka claude.ai; penyegaran akun dapat meminta endpoint Claude Web. Impor API Key sendiri tidak memakai jaringan.",
+      "desktopDesc": "Alat ini mengelola status masuk Claude Desktop. Status masuk disimpan lokal lebih dulu dan baru ditulis ke Claude Desktop resmi saat beralih akun.",
+      "cliDesc": "Alat ini mengelola Claude Code OAuth dan API Key dari beberapa penyedia. Peralihan OAuth menulis ke konfigurasi Claude Code lokal; API Key menulis nilai env penyedia ke Claude Code settings.json.",
+      "desktopPermission": "Cakupan izin: baca/tulis direktori data aplikasi Claude Desktop resmi. Snapshot Desktop disimpan di data akun lokal alat ini.",
+      "cliPermission": "Cakupan izin: membaca/menulis konfigurasi Claude Code lokal dan kredensial Claude Code di macOS Keychain; akun API Key disimpan lokal oleh alat ini dan ditulis sebagai env teks biasa di settings.json saat beralih atau menjalankan CLI.",
+      "desktopNetwork": "Cakupan jaringan: jendela masuk Desktop membuka claude.ai; penyegaran akun dapat meminta endpoint Claude Web.",
+      "cliNetwork": "Cakupan jaringan: OAuth mengakses otorisasi resmi Claude dan endpoint token/profile/usage; impor API Key tidak memakai jaringan, lalu Claude CLI mengakses provider yang dipilih setelah diluncurkan."
+    },
+    "search": "Cari akun Claude...",
+    "noAccounts": "Belum ada akun Claude",
+    "addAccount": {
+      "title": "Tambah akun Claude",
+      "desktopTitle": "Tambah Akun Claude Desktop",
+      "cliTitle": "Tambah Akun Claude CLI"
+    },
+    "deleteConfirm": "Hapus akun Claude {{email}}?",
+    "switch": {
+      "success": "Berhasil beralih"
+    },
+    "instances": {
+      "unsupportedDescPlatform": "Multi-instance Claude Desktop hanya didukung di macOS, Windows, dan Linux.",
+      "launchDialogTitle": "Jalankan Instance",
+      "launchCommand": "Perintah peluncuran",
+      "executeInTerminal": "Jalankan di terminal",
+      "startSuccess": "Claude Desktop dimulai"
+    },
+    "quota": {
+      "title": "Kuota",
+      "fiveHour": "Sesi saat ini",
+      "sevenDay": "Minggu ini (semua model)",
+      "sonnet": "Sonnet 7 hr",
+      "extra": "Penggunaan ekstra",
+      "empty": "Belum ada kuota",
+      "unsupported": "Tidak bisa refresh",
+      "updatedAt": "Diperbarui: {{time}}",
+      "resetAt": "{{label}} reset: {{time}}",
+      "refreshSuccess": "Kuota diperbarui",
+      "refreshAllDone": "Refresh kuota selesai",
+      "refreshFailed": "Gagal refresh kuota: {{error}}",
+      "refreshWithWarning": "Gagal refresh kuota: {{error}}",
+      "notUpdated": "Kuota belum diperbarui",
+      "updated": "Diperbarui",
+      "notUpdatedShort": "Belum diperbarui"
+    },
+    "addTabs": {
+      "desktop": "Desktop lokal",
+      "oauth": "OAuth",
+      "apiKey": "Kunci API",
+      "import": "Lokal/JSON"
+    },
+    "authMode": {
+      "oauth": "Mode OAuth",
+      "setup_token": "Token penyiapan",
+      "api_key": "Kunci API",
+      "desktop_oauth": "Login Desktop"
+    },
+    "apiKey": {
+      "desc": "Simpan API Key Claude CLI sebagai kredensial terpisah. Saat beralih atau menjalankan CLI, nilai env penyedia ditulis ke Claude Code settings.json tanpa menulis status masuk Claude Desktop.",
+      "nameLabel": "Nama akun",
+      "namePlaceholder": "Opsional, mis. APIKEY.FUN",
+      "keyLabel": "Kunci API",
+      "placeholder": "Tempel API Key provider",
+      "hide": "Sembunyikan API Key",
+      "show": "Tampilkan API Key",
+      "hint": "Akun API Key hanya untuk Claude CLI. Nilainya ditulis sebagai env teks biasa di Claude Code settings.json, tidak memengaruhi Claude Desktop, dan tidak mendukung penyegaran kuota langganan.",
+      "importAction": "Impor API Key",
+      "required": "Masukkan API Key",
+      "importSuccess": "Akun Claude API Key diimpor: {{name}}",
+      "quotaUnsupported": "Akun API Key tidak mendukung refresh",
+      "switchDisabled": "Akun API Key tidak bisa beralih ke Claude Desktop",
+      "cliUnsupported": "Akun API Key tidak bisa membuka Claude CLI",
+      "providerLabel": "Penyedia",
+      "customProvider": "Kustom",
+      "endpointLabel": "Endpoint provider",
+      "officialEndpoint": "Default resmi",
+      "baseUrlLabel": "URL dasar",
+      "baseUrlPlaceholder": "Kosong memakai alamat resmi Anthropic",
+      "keyFieldLabel": "Kolom auth",
+      "baseUrlInvalid": "Base URL bukan URL valid"
+    },
+    "desktopOAuth": {
+      "title": "Login Claude Desktop",
+      "desc": "Login Claude di alat ini; mendukung Google, Apple, email, dan free.",
+      "start": "Buka login",
+      "hint": "Simpan lokal dulu; tulis ke Claude Desktop saat ganti akun.",
+      "nameLabel": "Nama akun",
+      "namePlaceholder": "Opsional, misalnya Claude Free",
+      "waiting": "Login di jendela Claude lalu selesaikan impor di sini.",
+      "profileDir": "Direktori profile terisolasi",
+      "complete": "Selesai",
+      "localTitle": "Impor Desktop saat ini",
+      "localDesc": "Menyalin sesi Claude Desktop saat ini sebagai snapshot lokal.",
+      "localAction": "Impor",
+      "localSuccess": "Login Claude Desktop lokal diimpor: {{name}}",
+      "importSuccess": "Login Claude Desktop diimpor: {{name}}",
+      "switchHint": "Beralih ke Claude Desktop resmi",
+      "planUnknown": "Paket tidak dikenal"
+    },
+    "oauth": {
+      "title": "Otorisasi Claude OAuth",
+      "desc": "Buka halaman otorisasi OAuth resmi Claude, lalu tempel tautan callback atau code untuk mengimpor akun.",
+      "start": "Otorisasi OAuth",
+      "proRequiredHint": "OAuth resmi Claude biasanya dipakai untuk otorisasi Claude Code. Jika halaman berhenti di upgrade atau tanpa izin, gunakan masuk Claude Desktop.",
+      "openInstruction": "Klik tombol di bawah dan selesaikan otorisasi Claude OAuth di browser.",
+      "waiting": "Setelah selesai, tempel URL halaman akhir atau code yang ditampilkan di bawah.",
+      "authUrl": "Tautan otorisasi",
+      "preparing": "Membuat tautan otorisasi...",
+      "openInBrowser": "Buka di browser",
+      "openFailed": "Gagal membuka tautan otorisasi: {{error}}",
+      "callbackPlaceholder": "Tempel tautan callback atau code otorisasi",
+      "callbackRequired": "Tempel tautan callback atau code setelah otorisasi selesai",
+      "authorizeUrlNotCallback": "Yang ditempel adalah tautan awal otorisasi di atas, bukan code setelah selesai. Selesaikan otorisasi di browser dulu, lalu salin URL halaman akhir atau code yang ditampilkan.",
+      "complete": "Selesaikan impor",
+      "emailPlaceholder": "Email (isi jika tidak terdeteksi)",
+      "importSuccess": "Otorisasi Claude OAuth diimpor: {{name}}"
+    },
+    "plan": {
+      "label": "Label paket",
+      "selectPlaceholder": "Pilih paket",
+      "updateFailed": "Gagal memperbarui label paket: {{error}}"
+    },
+    "legacyOAuth": {
+      "switchDisabled": "Akun OAuth lama tidak dapat dialihkan ke Claude Desktop",
+      "quotaUnsupported": "Akun OAuth lama tidak lagi mendukung penyegaran",
+      "cliUnsupported": "Akun OAuth lama tidak dapat membuka Claude CLI"
+    },
+    "cli": {
+      "quickLaunch": "Buka CLI",
+      "selectWorkingDir": "Pilih folder kerja Claude CLI",
+      "launchSuccess": "Claude CLI dibuka",
+      "prepared": "Claude CLI siap",
+      "launchFailed": "Gagal membuka Claude CLI: {{error}}",
+      "localTitle": "Impor Claude Code saat ini",
+      "localDesc": "Baca status masuk OAuth Claude Code lokal saat ini dan salin sebagai snapshot akun lokal.",
+      "localSuccess": "Masuk Claude Code lokal diimpor: {{name}}"
+    },
+    "accountNote": {
+      "title": "Catatan akun",
+      "desc": "Tambahkan catatan lokal untuk {{email}} agar akun mudah dikenali saat berpindah.",
+      "label": "Catatan akun",
+      "placeholder": "Contoh: Free utama, Max 20x, akun tim",
+      "saved": "Catatan akun disimpan",
+      "saveFailed": "Gagal menyimpan catatan: {{error}}",
+      "emptyTitle": "Tambah catatan akun",
+      "short": "Catatan",
+      "addShort": "Catatan"
+    },
+    "account": {
+      "signedInWith": "Masuk dengan {{provider}}",
+      "userId": "ID pengguna",
+      "nickname": "Nama panggilan"
+    },
+    "selection": {
+      "selected": "{{count}} dipilih"
+    },
+    "deleteSelectedLabel": "{{count}} akun",
+    "subPlatform": {
+      "label": "Subplatform Claude",
+      "desktop": "Claude Desktop lokal",
+      "cli": "Claude baris perintah"
+    },
+    "searchDesktop": "Cari akun Claude Desktop...",
+    "searchCli": "Cari akun Claude CLI...",
+    "noDesktopAccounts": "Belum ada akun Claude Desktop",
+    "noCliAccounts": "Belum ada akun Claude CLI"
   }
 }

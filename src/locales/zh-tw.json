@@ -197,7 +197,7 @@
         "planEndsInHours": "在 {{hours}}h 中重置"
       },
       "flowNotice": {
-        "alternative": "替代方案：使用多開隔離（不同 --user-data-dir）。每個實例登入一次，之後按實例啟動即可快速切換到目標帳號環境。"
+        "alternative": "多開實例隔離：使用獨立受管 profile；每個實例登入一次，之後即可按實例快速切換帳號環境。"
       },
       "injecting": "注入中...",
       "usage": {
@@ -261,7 +261,8 @@
     "switchClassicLayoutDontAskAgain": "不再顯示此提示",
     "switchClassicLayoutConfirm": "立即切換",
     "2faManager": "2FA 管理",
-    "apiRelay": "中轉站"
+    "apiRelay": "中轉站",
+    "claude": "Claude"
   },
   "sponsors": {
     "pageTitle": "贊助商",
@@ -778,7 +779,10 @@
       "codexAppSpeedFast": "快速",
       "codexAppSpeedLaunch": "重新啟動 Codex",
       "codexAppSpeedSaveFailed": "儲存 Codex 速度失敗：{{error}}",
-      "codexAppSpeedLaunchFailed": "重新啟動 Codex 失敗：{{error}}"
+      "codexAppSpeedLaunchFailed": "重新啟動 Codex 失敗：{{error}}",
+      "claudeSettingsTitle": "Claude Desktop 設定",
+      "claudeAutoRefresh": "Claude Desktop 自動重新整理額度",
+      "claudeAutoRefreshDesc": "在背景自動更新 Claude Desktop 帳號額度快取"
     },
     "network": {
       "apiTitle": "反重力駕駛艙 API",
@@ -1262,7 +1266,10 @@
     "switchSuccess": "切換成功",
     "switched": "已切換至 {{email}}",
     "tagButton": "編輯標籤",
-    "tagUpdated": "標籤已更新"
+    "tagUpdated": "標籤已更新",
+    "plan": {
+      "personal": "個人"
+    }
   },
   "overview": {
     "title": "帳號總覽",
@@ -2388,7 +2395,7 @@
     },
     "sessionManager": {
       "title": "會話管理",
-      "desc": "同步與清理統一放在這裡：頂部可一鍵同步到所有實例，下面按專案展開查看會話並移到垃圾桶。",
+      "desc": "同步、可見性修復、清理與還原集中在這裡：上方可同步工作階段、修復可見性或從垃圾桶還原，下方可依專案展開檢視並移到垃圾桶。",
       "actions": {
         "moveToTrash": "移到垃圾桶",
         "syncSessions": "同步會話",
@@ -2397,13 +2404,15 @@
         "repairVisibility": "修復可見性",
         "restoreSessions": "還原工作階段",
         "copySessionId": "複製會話 ID",
+        "selectAllSessions": "全選全部會話",
+        "clearSelectedSessions": "取消全選",
         "copyToInstance": "複製到實例"
       },
       "confirm": {
         "title": "移到垃圾桶",
         "message": "會將所選會話從對應實例中移到垃圾桶，方便後續恢復；執行中的實例可能需要重新啟動後才會反映。確認繼續？",
         "syncMessage": "會將缺失的執行緒與對應會話同步到所有實例中，已有內容不會重複寫入，寫入前會先備份目標實例關鍵檔案。確認繼續？",
-        "repairVisibilityMessage": "這將依照每個實例根目錄 config.toml 中的 model_provider（缺失時預設使用 openai），修復 rollout 檔案與 state_5.sqlite 內的供應商中繼資料。所有即將寫入變更的檔案都會先建立備份。正在執行的實例可能需要重新啟動，變更才會顯示。是否繼續？"
+        "repairVisibilityMessage": "會校正官方 Codex state DB 中影響側邊欄顯示的工作階段記錄；寫入前會先備份將修改的 state DB。"
       },
       "empty": {
         "title": "還沒有可管理的會話",
@@ -2439,6 +2448,62 @@
         "selectedCount": "已選擇 {{count}} 個工作階段",
         "existingCount": "目標已存在 {{count}} 個",
         "confirm": "複製工作階段"
+      },
+      "repairModal": {
+        "quickTitle": "修復可見性",
+        "quickDesc": "校正官方 Codex state DB 中影響側邊欄顯示的工作階段記錄。",
+        "deepTitle": "修復可見性",
+        "deepDesc": "校正官方 Codex state DB 中影響側邊欄顯示的工作階段記錄。",
+        "quickProgressTitle": "修復進度",
+        "deepProgressTitle": "修復進度",
+        "running": "正在修復...",
+        "startQuick": "開始修復",
+        "startDeep": "開始修復",
+        "progress": {
+          "queued": "正在啟動修復任務...",
+          "collectInstances": "正在收集 Codex 實例...",
+          "scanInstances": "正在準備掃描實例...",
+          "scanInstance": "正在掃描 {{instance}}（{{current}}/{{total}}）...",
+          "backupInstance": "正在備份 {{instance}}（{{current}}/{{total}}）...",
+          "writeInstance": "正在寫入 {{instance}}（{{current}}/{{total}}）...",
+          "rebuildMetadata": "正在重新整理 {{instance}} 的官方工作階段狀態...",
+          "pruneBackups": "正在清理舊備份...",
+          "done": "修復已完成",
+          "writeSqliteProvider": "正在寫入 {{instance}} 的 SQLite 可見性...",
+          "writeRolloutFiles": "正在略過舊工作階段檔案寫入...",
+          "writeSqliteTimestamps": "正在校正 {{instance}} 的 SQLite 時間...",
+          "writeSessionIndex": "正在略過舊索引寫入..."
+        },
+        "targetProvider": "目標 provider",
+        "defaultProvider": "預設",
+        "loadingProviders": "正在讀取 provider...",
+        "noProvider": "未發現 provider",
+        "providerLoadFailed": "讀取 provider 候選失敗：{{error}}",
+        "scopeTitle": "會話範圍",
+        "scopeAll": "全部會話",
+        "scopeAllDesc": "修復目前管理清單中的 {{count}} 筆會話。",
+        "scopeSelected": "所選會話",
+        "scopeSelectedDesc": "只修復已勾選的 {{count}} 筆會話。",
+        "scopeSelectedEmpty": "請先在清單中勾選會話。",
+        "providerSource": {
+          "config": "設定",
+          "rollout": "會話",
+          "sqlite": "SQLite 資料庫"
+        },
+        "targetInstance": "目標實例",
+        "loadingInstances": "正在讀取實例...",
+        "noInstance": "未發現實例",
+        "instanceLoadFailed": "讀取實例失敗：{{error}}",
+        "defaultInstance": "預設實例",
+        "runningInstance": "執行中",
+        "instanceProvider": "目前 provider",
+        "instanceScopeTitle": "實例範圍",
+        "instanceScopeTarget": "僅目標實例",
+        "instanceScopeTargetDesc": "只修復上方選取的實例，通常更快。",
+        "instanceScopeAll": "全部實例",
+        "instanceScopeAllDesc": "修復所有 Codex 實例，適合多開實例一起復原。",
+        "progressTitle": "修復進度",
+        "start": "開始修復"
       }
     },
     "modelProviders": {
@@ -2700,15 +2765,17 @@
     },
     "apiSwitchNotice": {
       "title": "Codex 工作階段不可見",
-      "message": "偵測到 Codex 已從 {{from}} 切換到 {{to}}。由於官方機制，API 與帳號直接切換後，原有工作階段可能不會自動顯示。正在自動修復工作階段可見性，後續也可以透過「工作階段管理」中的「修復可見性」功能修復。",
+      "message": "偵測到 Codex 已從 {{from}} 切換到 {{to}}。依官方機制，這類切換後既有工作階段可能不會自動顯示。正在自動修復工作階段可見性，之後也可在「工作階段管理」中手動修復。",
       "repairing": "正在修復 Codex 工作階段可見性...",
-      "repairFailed": "自動修復失敗。你仍可稍後在「工作階段管理」中使用「修復可見性」重試。",
+      "repairFailed": "修復可見性失敗。你仍可稍後在「工作階段管理」中重試。",
       "type": {
         "api": "API 模式",
         "apiKey": "API 金鑰",
         "apiService": "API 服務",
         "account": "帳號"
-      }
+      },
+      "manualMessage": "修復可見性會校正官方 Codex state DB 中影響側邊欄顯示的工作階段記錄，適合帳號與 API Key 切換後恢復工作階段。",
+      "repairFailedWithError": "修復可見性失敗：{{error}}"
     },
     "accountNote": {
       "title": "帳號備註",
@@ -2957,6 +3024,13 @@
       "selectAllAccounts": "選擇全部帳號",
       "selectReady": "選擇正常帳號",
       "clearSelection": "取消選擇"
+    },
+    "autoRepairMode": {
+      "label": "自動修復邏輯",
+      "tooltip": "切換時使用哪套會話可見性自動修復邏輯",
+      "legacyBefore4eb75d96": "4eb75d96 前邏輯",
+      "legacy4eb75d96": "4eb75d96 邏輯",
+      "current": "目前邏輯"
     }
   },
   "githubCopilot": {
@@ -3228,6 +3302,10 @@
       "title": "篩選記憶",
       "enable": "記住帳號總覽篩選（不含搜尋）",
       "hint": "預設關閉。開啟後會依平台記住篩選、標籤與排序。"
+    },
+    "claudeRefreshInterval": "配額自動重新整理",
+    "claude": {
+      "appPath": "Claude Desktop 路徑"
     }
   },
   "quotaAlert": {
@@ -3793,7 +3871,11 @@
       "resetsIn": "在 {{relative}} 中重置",
       "resetsSoon": "很快就會重置",
       "resetsUnknown": "重置時間未知",
-      "onDemand": "一經請求"
+      "onDemand": "一經請求",
+      "gemini5h": "5h",
+      "geminiWeekly": "Weekly",
+      "claude5h": "5h",
+      "claudeWeekly": "Weekly"
     },
     "instances": {
       "unsupported": "尚不支援Gemini Cli多實例管理。",
@@ -4504,6 +4586,16 @@
       "queryFailed": "額度查詢失敗：{{error}}",
       "saveFailed": "一鍵寫入失敗：{{error}}"
     },
+    "models": {
+      "title": "可用模型",
+      "desc": "從目前 API Key 的模型介面讀取，保存到 Codex 或 Claude CLI 時會帶入這些模型目錄。",
+      "count": "{{count}} 個模型",
+      "loading": "讀取中",
+      "loadingDesc": "正在從目前 API Key 讀取模型清單...",
+      "empty": "輸入 API Key 後讀取可用模型。",
+      "emptyFromKey": "目前 API Key 未回傳模型清單。",
+      "queryFailed": "模型清單讀取失敗：{{error}}"
+    },
     "keyManager": {
       "title": "金鑰管理",
       "desc": "保存常用 API Key，點擊即可切換並自動查詢額度。",
@@ -4516,9 +4608,202 @@
       "editAlias": "修改別名",
       "renamePlaceholder": "輸入新別名...",
       "createdAt": "新增於 {{time}}",
-      "saveFlash": "剛剛保存"
+      "saveFlash": "剛剛保存",
+      "addingToCodex": "正在加入 Codex...",
+      "addedToCodex": "已加入 Codex",
+      "addToCodexFailed": "加入 Codex 失敗：{{error}}",
+      "addingToClaude": "正在加入 Claude CLI...",
+      "addedToClaude": "已加入 Claude CLI",
+      "addToClaudeFailed": "加入 Claude CLI 失敗：{{error}}",
+      "codexAdded": "Codex 已加入",
+      "claudeAdded": "Claude 已加入",
+      "addToCodex": "加入 Codex",
+      "addToClaude": "加入 Claude CLI",
+      "codexShort": "Codex",
+      "claudeShort": "Claude CLI"
     },
     "copyKey": "複製金鑰",
     "clearKey": "清除輸入"
+  },
+  "claude": {
+    "import": {
+      "localSuccess": "已匯入本機 Claude Desktop 登入狀態：{{count}} 個",
+      "localClient": "匯入目前 Desktop",
+      "jsonLabel": "JSON 資料",
+      "jsonPlaceholder": "貼上匯出的 Claude 帳號 JSON",
+      "localDesc": "讀取本機官方 Claude Desktop 目前登入狀態，複製為本工具本機帳號快照。",
+      "desktopJsonPlaceholder": "貼上匯出的 Claude Desktop 帳號 JSON",
+      "cliJsonPlaceholder": "貼上匯出的 Claude CLI 帳號 JSON"
+    },
+    "deleteCurrentDisabled": "目前帳號不可刪除",
+    "flowNotice": {
+      "title": "Claude 帳號管理說明（點擊展開/收合）",
+      "desc": "本工具可管理 Claude Desktop 登入狀態與 Anthropic API Key。Desktop 登入會在平台授權視窗完成並先儲存在本機帳號庫；切號時才寫入官方 Claude Desktop。",
+      "permission": "權限範圍：讀取/寫入官方 Claude Desktop 應用資料目錄；API Key 與 Desktop 快照會儲存在本工具本機帳號資料。",
+      "network": "網路範圍：Desktop 登入視窗會存取 claude.ai；刷新帳號會請求 Claude Web 相關介面；API Key 匯入本身不連網。",
+      "desktopDesc": "本工具可管理 Claude Desktop 登入狀態。登入會先儲存在本工具本機帳號庫；切號時才寫入官方 Claude Desktop。",
+      "cliDesc": "本工具可管理 Claude Code OAuth 與多供應商 API Key。OAuth 切號會寫入本機 Claude Code 設定；API Key 會寫入 Claude Code settings.json 的 env。",
+      "desktopPermission": "權限範圍：讀取/寫入官方 Claude Desktop 應用程式資料目錄；Desktop 快照保存於本工具本機帳號資料。",
+      "cliPermission": "權限範圍：讀取/寫入本機 Claude Code 設定目錄與 macOS Keychain 中的 Claude Code 憑證；API Key 帳號保存在本工具本機資料，切換或啟動 CLI 時會以明文寫入 settings.json 的 env。",
+      "desktopNetwork": "網路範圍：Desktop 登入視窗會開啟 claude.ai；重新整理帳號可能請求 Claude Web 相關端點。",
+      "cliNetwork": "網路範圍：OAuth 授權會存取 Claude 官方授權頁與 token/profile/usage 介面；API Key 匯入不連網，啟動後由 Claude CLI 存取所選供應商。"
+    },
+    "search": "搜尋 Claude 帳號...",
+    "noAccounts": "尚無 Claude 帳號",
+    "addAccount": {
+      "title": "新增 Claude 帳號",
+      "desktopTitle": "新增 Claude Desktop 帳號",
+      "cliTitle": "新增 Claude CLI 帳號"
+    },
+    "deleteConfirm": "確定刪除 Claude 帳號 {{email}} 嗎？",
+    "switch": {
+      "success": "切換成功"
+    },
+    "instances": {
+      "unsupportedDescPlatform": "Claude Desktop 多開實例僅支援 macOS、Windows 和 Linux。",
+      "launchDialogTitle": "啟動實例",
+      "launchCommand": "啟動命令",
+      "executeInTerminal": "在終端機執行",
+      "startSuccess": "Claude Desktop 已啟動"
+    },
+    "quota": {
+      "title": "額度",
+      "fiveHour": "目前工作階段",
+      "sevenDay": "本週（所有模型）",
+      "sonnet": "Sonnet額",
+      "extra": "額外用量",
+      "empty": "暫無額度",
+      "unsupported": "不可刷新",
+      "updatedAt": "更新：{{time}}",
+      "resetAt": "{{label}} 重置：{{time}}",
+      "refreshSuccess": "額度已刷新",
+      "refreshAllDone": "額度刷新完成",
+      "refreshFailed": "額度刷新失敗：{{error}}",
+      "refreshWithWarning": "額度刷新失敗：{{error}}",
+      "notUpdated": "額度未重新整理",
+      "updated": "已更新",
+      "notUpdatedShort": "未刷新"
+    },
+    "addTabs": {
+      "desktop": "桌面",
+      "oauth": "OAuth",
+      "apiKey": "API 金鑰",
+      "import": "本機/JSON"
+    },
+    "authMode": {
+      "oauth": "OAuth 模式",
+      "setup_token": "設定 Token",
+      "api_key": "API Key 模式",
+      "desktop_oauth": "Desktop 登入"
+    },
+    "apiKey": {
+      "desc": "將 Claude CLI API Key 儲存為獨立憑證；切換或啟動 CLI 時會寫入 Claude Code settings.json 的 env，不會寫入 Claude Desktop 登入狀態。",
+      "nameLabel": "帳號名稱",
+      "namePlaceholder": "選填，例如 APIKEY.FUN",
+      "keyLabel": "API 金鑰",
+      "placeholder": "貼上供應商 API Key",
+      "hide": "隱藏 API Key",
+      "show": "顯示 API Key",
+      "hint": "API Key 帳號僅用於 Claude CLI；會以明文 env 寫入 Claude Code settings.json，不會寫入 Claude Desktop 登入狀態，也不支援訂閱額度刷新。",
+      "importAction": "匯入 API Key",
+      "required": "請輸入 API Key",
+      "importSuccess": "Claude API Key 帳號已匯入：{{name}}",
+      "quotaUnsupported": "API Key 帳號不支援刷新",
+      "switchDisabled": "API Key 帳號不能切換到 Claude Desktop",
+      "cliUnsupported": "API Key 帳號不能啟動 Claude CLI",
+      "providerLabel": "供應商",
+      "customProvider": "自訂",
+      "endpointLabel": "供應商端點",
+      "officialEndpoint": "官方預設",
+      "baseUrlLabel": "基礎 URL",
+      "baseUrlPlaceholder": "留空使用 Anthropic 官方預設地址",
+      "keyFieldLabel": "認證欄位",
+      "baseUrlInvalid": "Base URL 不是有效 URL"
+    },
+    "desktopOAuth": {
+      "title": "Claude Desktop 登入",
+      "desc": "在本工具開啟 Claude 登入視窗，支援 Google、Apple、電子郵件與 free 帳號。",
+      "start": "開啟登入",
+      "hint": "登入狀態會先儲存在本工具本機帳號庫，不會立刻寫入官方 Claude Desktop；切號時才寫回 Claude。",
+      "nameLabel": "帳號名稱",
+      "namePlaceholder": "可選，例如 Claude Free",
+      "waiting": "請在已開啟的 Claude 授權視窗完成登入。看到聊天頁後回到這裡點擊完成匯入。",
+      "profileDir": "隔離 profile 目錄",
+      "complete": "完成匯入",
+      "localTitle": "匯入目前 Desktop",
+      "localDesc": "讀取本機官方 Claude Desktop 目前登入狀態，複製為本工具本機帳號快照。",
+      "localAction": "匯入",
+      "localSuccess": "已匯入本機 Claude Desktop 登入狀態：{{name}}",
+      "importSuccess": "Claude Desktop 登入狀態已匯入：{{name}}",
+      "switchHint": "切換到官方 Claude Desktop",
+      "planUnknown": "訂閱未知"
+    },
+    "oauth": {
+      "title": "Claude OAuth 授權",
+      "desc": "開啟 Claude 官方 OAuth 授權頁，完成後貼上回呼連結或 code 匯入帳號。",
+      "start": "OAuth 授權",
+      "proRequiredHint": "Claude 官方 OAuth 通常用於 Claude Code 授權；如果頁面停在升級或無權限頁面，可改用 Claude Desktop 登入。",
+      "openInstruction": "點擊下方按鈕，在瀏覽器中完成 Claude OAuth 授權。",
+      "waiting": "完成授權後，請將最終頁面位址或頁面顯示的 code 貼到下方。",
+      "authUrl": "授權連結",
+      "preparing": "正在產生授權連結...",
+      "openInBrowser": "在瀏覽器中開啟",
+      "openFailed": "開啟授權連結失敗：{{error}}",
+      "callbackPlaceholder": "貼上回呼連結或授權 code",
+      "callbackRequired": "請貼上授權完成後的回呼連結或 code",
+      "authorizeUrlNotCallback": "這裡貼上的是上方授權入口連結，不是授權完成後的 code。請先在瀏覽器完成授權，然後複製最終頁面位址或頁面顯示的 code。",
+      "complete": "完成匯入",
+      "emailPlaceholder": "電子郵件（無法自動辨識時填寫）",
+      "importSuccess": "Claude OAuth 授權匯入成功：{{name}}"
+    },
+    "plan": {
+      "label": "訂閱標識",
+      "selectPlaceholder": "待選擇",
+      "updateFailed": "更新訂閱標識失敗：{{error}}"
+    },
+    "legacyOAuth": {
+      "switchDisabled": "舊 OAuth 帳號不能切換到 Claude Desktop",
+      "quotaUnsupported": "舊 OAuth 帳號不再支援刷新",
+      "cliUnsupported": "舊 OAuth 帳號不能啟動 Claude CLI"
+    },
+    "cli": {
+      "quickLaunch": "CLI 啟動",
+      "selectWorkingDir": "選擇 Claude CLI 工作目錄",
+      "launchSuccess": "已啟動 Claude CLI",
+      "prepared": "Claude CLI 已準備",
+      "launchFailed": "啟動 Claude CLI 失敗：{{error}}",
+      "localTitle": "匯入目前 Claude Code",
+      "localDesc": "讀取本機 Claude Code 目前 OAuth 登入狀態，複製為本工具本機帳號快照。",
+      "localSuccess": "已匯入本機 Claude Code 登入狀態：{{name}}"
+    },
+    "accountNote": {
+      "title": "帳號備註",
+      "desc": "為 {{email}} 加入本機備註，方便切換帳號時辨識。",
+      "label": "帳號備註",
+      "placeholder": "例如：Free 主帳號、Max 20x、團隊帳號",
+      "saved": "帳號備註已儲存",
+      "saveFailed": "儲存帳號備註失敗：{{error}}",
+      "emptyTitle": "填寫帳號備註",
+      "short": "帳號備註",
+      "addShort": "加備註"
+    },
+    "account": {
+      "signedInWith": "使用 {{provider}} 登入",
+      "userId": "使用者 ID",
+      "nickname": "暱稱"
+    },
+    "selection": {
+      "selected": "已選 {{count}}"
+    },
+    "deleteSelectedLabel": "{{count}} 個帳號",
+    "subPlatform": {
+      "label": "Claude 子平台",
+      "desktop": "Claude 桌面端",
+      "cli": "Claude 命令列"
+    },
+    "searchDesktop": "搜尋 Claude Desktop 帳號...",
+    "searchCli": "搜尋 Claude CLI 帳號...",
+    "noDesktopAccounts": "暫無 Claude Desktop 帳號",
+    "noCliAccounts": "暫無 Claude CLI 帳號"
   }
 }

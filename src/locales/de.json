@@ -197,7 +197,7 @@
         "planEndsInHours": "Wird in {{hours}}h zurückgesetzt"
       },
       "flowNotice": {
-        "alternative": "Alternative: Multi-Instanz-Isolierung verwenden (unterschiedliche --user-data-dir). Pro Instanz einmal anmelden und danach instanzweise starten, um schnell in die Zielkontoumgebung zu wechseln."
+        "alternative": "Multi-Instanz-Isolierung: Nutze getrennte verwaltete Profile und melde dich pro Instanz einmal an, um schnell zwischen Kontoumgebungen zu wechseln."
       },
       "injecting": "Wird injiziert...",
       "usage": {
@@ -261,7 +261,8 @@
     "switchClassicLayoutDontAskAgain": "Diesen Hinweis nicht erneut anzeigen",
     "switchClassicLayoutConfirm": "Jetzt wechseln",
     "2faManager": "2FA-Verwaltung",
-    "apiRelay": "API-Relay"
+    "apiRelay": "API-Relay",
+    "claude": "Claude"
   },
   "sponsors": {
     "pageTitle": "Sponsoren",
@@ -778,7 +779,10 @@
       "codexAppSpeedFast": "Schnell",
       "codexAppSpeedLaunch": "Codex neu starten",
       "codexAppSpeedSaveFailed": "Codex-Geschwindigkeit konnte nicht gespeichert werden: {{error}}",
-      "codexAppSpeedLaunchFailed": "Codex konnte nicht neu gestartet werden: {{error}}"
+      "codexAppSpeedLaunchFailed": "Codex konnte nicht neu gestartet werden: {{error}}",
+      "claudeSettingsTitle": "Claude Desktop-Einstellungen",
+      "claudeAutoRefresh": "Claude Desktop-Kontingent automatisch aktualisieren",
+      "claudeAutoRefreshDesc": "Aktualisiert den Kontingent-Cache für Claude Desktop-Konten automatisch im Hintergrund."
     },
     "network": {
       "apiTitle": "Antigravity-Cockpit-API",
@@ -1262,7 +1266,10 @@
     "switchSuccess": "Konto erfolgreich gewechselt",
     "switched": "Zu {{email}} gewechselt",
     "tagButton": "Tags bearbeiten",
-    "tagUpdated": "Tag aktualisiert"
+    "tagUpdated": "Tag aktualisiert",
+    "plan": {
+      "personal": "Persönlich"
+    }
   },
   "overview": {
     "title": "Kontoübersicht",
@@ -2277,7 +2284,7 @@
     },
     "sessionManager": {
       "title": "Sitzungsverwaltung",
-      "desc": "Synchronisierung und Bereinigung befinden sich hier zusammen: Über die Aktion oben kannst du in alle Instanzen synchronisieren und unten jedes Projekt erweitern, Sitzungen prüfen und in den Papierkorb verschieben.",
+      "desc": "Synchronisierung, Sichtbarkeitsreparatur, Bereinigung und Wiederherstellung sind hier gebündelt: oben Sitzungen synchronisieren, Sichtbarkeit reparieren oder aus dem Papierkorb wiederherstellen; darunter Projekte öffnen und Sitzungen prüfen oder löschen.",
       "actions": {
         "moveToTrash": "In den Papierkorb verschieben",
         "syncSessions": "Sitzungen synchronisieren",
@@ -2286,13 +2293,15 @@
         "repairVisibility": "Sichtbarkeit reparieren",
         "restoreSessions": "Sitzungen wiederherstellen",
         "copySessionId": "Sitzungs-ID kopieren",
+        "selectAllSessions": "Alle Sitzungen wählen",
+        "clearSelectedSessions": "Auswahl aufheben",
         "copyToInstance": "In Instanz kopieren"
       },
       "confirm": {
         "title": "In den Papierkorb verschieben",
         "message": "Ausgewählte Sitzungen werden aus den jeweiligen Instanzen in den Papierkorb verschoben, damit sie später wiederhergestellt werden können. Laufende Instanzen müssen möglicherweise neu gestartet werden, bevor die Änderung sichtbar wird. Fortfahren?",
         "syncMessage": "Fehlende Threads und ihre Sitzungsdaten werden in alle Instanzen synchronisiert. Vorhandene Inhalte werden nicht erneut geschrieben, und die Dateien der Zielinstanz werden vor jedem Schreibvorgang gesichert. Fortfahren?",
-        "repairVisibilityMessage": "Dadurch werden die Anbieter-Metadaten in Rollout-Dateien und in state_5.sqlite anhand des model_provider aus der jeweiligen root-config.toml der Instanz repariert (wenn er fehlt, wird standardmäßig openai verwendet). Dateien, die geändert werden, werden vor dem Schreiben gesichert. Bei laufenden Instanzen kann ein Neustart nötig sein, bevor die Änderung sichtbar wird. Fortfahren?"
+        "repairVisibilityMessage": "Aktualisiert die offiziellen Codex-state-DB-Einträge, die die Sitzungen in der Seitenleiste steuern. Die state-DB-Dateien werden vor dem Schreiben gesichert."
       },
       "empty": {
         "title": "Keine Sitzungen zur Verwaltung",
@@ -2328,6 +2337,62 @@
         "selectedCount": "{{count}} Sitzung(en) ausgewählt",
         "existingCount": "{{count}} bereits im Ziel",
         "confirm": "Sitzungen kopieren"
+      },
+      "repairModal": {
+        "quickTitle": "Sichtbarkeit reparieren",
+        "quickDesc": "Aktualisiert die offiziellen Codex-state-DB-Einträge für die Seitenleiste.",
+        "deepTitle": "Sichtbarkeit reparieren",
+        "deepDesc": "Aktualisiert die offiziellen Codex-state-DB-Einträge für die Seitenleiste.",
+        "quickProgressTitle": "Reparaturfortschritt",
+        "deepProgressTitle": "Reparaturfortschritt",
+        "running": "Reparatur läuft...",
+        "startQuick": "Reparatur starten",
+        "startDeep": "Reparatur starten",
+        "progress": {
+          "queued": "Reparatur wird gestartet...",
+          "collectInstances": "Codex-Instanzen werden gesammelt...",
+          "scanInstances": "Instanzscan wird vorbereitet...",
+          "scanInstance": "{{instance}} wird gescannt ({{current}}/{{total}})...",
+          "backupInstance": "{{instance}} wird gesichert ({{current}}/{{total}})...",
+          "writeInstance": "{{instance}} wird geschrieben ({{current}}/{{total}})...",
+          "rebuildMetadata": "Offizieller Sitzungsstatus für {{instance}} wird aktualisiert...",
+          "pruneBackups": "Alte Backups werden bereinigt...",
+          "done": "Reparatur abgeschlossen",
+          "writeSqliteProvider": "SQLite-Sichtbarkeit für {{instance}} wird geschrieben...",
+          "writeRolloutFiles": "Schreiben alter Sitzungsdateien wird übersprungen...",
+          "writeSqliteTimestamps": "SQLite-Zeiten für {{instance}} werden korrigiert...",
+          "writeSessionIndex": "Schreiben alter Indexdateien wird übersprungen..."
+        },
+        "targetProvider": "Ziel-provider",
+        "defaultProvider": "Standard",
+        "loadingProviders": "Provider werden geladen...",
+        "noProvider": "Kein provider gefunden",
+        "providerLoadFailed": "Provider-Kandidaten konnten nicht geladen werden: {{error}}",
+        "scopeTitle": "Sitzungsumfang",
+        "scopeAll": "Alle Sitzungen",
+        "scopeAllDesc": "{{count}} Sitzung(en) in der aktuellen Liste reparieren.",
+        "scopeSelected": "Ausgewählte Sitzungen",
+        "scopeSelectedDesc": "Nur {{count}} ausgewählte Sitzung(en) reparieren.",
+        "scopeSelectedEmpty": "Wählen Sie zuerst Sitzungen in der Liste aus.",
+        "providerSource": {
+          "config": "Konfiguration",
+          "rollout": "Sitzungen",
+          "sqlite": "SQLite-DB"
+        },
+        "targetInstance": "Zielinstanz",
+        "loadingInstances": "Instanzen werden geladen...",
+        "noInstance": "Keine Instanz gefunden",
+        "instanceLoadFailed": "Instanzen konnten nicht geladen werden: {{error}}",
+        "defaultInstance": "Standardinstanz",
+        "runningInstance": "Läuft",
+        "instanceProvider": "Aktueller Provider",
+        "instanceScopeTitle": "Instanzumfang",
+        "instanceScopeTarget": "Nur Zielinstanz",
+        "instanceScopeTargetDesc": "Repariert nur die ausgewählte Instanz, meist schneller.",
+        "instanceScopeAll": "Alle Instanzen",
+        "instanceScopeAllDesc": "Repariert alle Codex-Instanzen bei gemeinsamer Wiederherstellung.",
+        "progressTitle": "Reparaturfortschritt",
+        "start": "Reparatur starten"
       }
     },
     "api": {
@@ -2700,15 +2765,17 @@
     },
     "apiSwitchNotice": {
       "title": "Codex-Sitzungen ausgeblendet",
-      "message": "Codex wurde von {{from}} zu {{to}} umgeschaltet. Aufgrund des offiziellen Verhaltens erscheinen vorhandene Sitzungen nach dem direkten Wechsel zwischen API und Konten möglicherweise nicht automatisch. Die Sitzungsanzeige wird jetzt automatisch repariert; später geht das auch über Sitzungsverwaltung > Sichtbarkeit reparieren.",
+      "message": "Codex wurde von {{from}} zu {{to}} gewechselt. Aufgrund des offiziellen Verhaltens werden bestehende Sitzungen nach so einem Wechsel eventuell nicht automatisch angezeigt. Die Sitzungssichtbarkeit wird automatisch repariert; später ist das auch in der Sitzungsverwaltung möglich.",
       "repairing": "Codex-Sitzungssichtbarkeit wird repariert...",
-      "repairFailed": "Die automatische Reparatur ist fehlgeschlagen. Sie können es später unter Sitzungsverwaltung > Sichtbarkeit reparieren erneut versuchen.",
+      "repairFailed": "Reparatur der Sichtbarkeit fehlgeschlagen. Du kannst es später in der Sitzungsverwaltung erneut versuchen.",
       "type": {
         "api": "API-Modus",
         "apiKey": "API-Schlüssel",
         "apiService": "API-Dienst",
         "account": "Konto"
-      }
+      },
+      "manualMessage": "Sichtbarkeit reparieren aktualisiert die offiziellen Codex-state-DB-Einträge, die die Sitzungen in der Seitenleiste steuern. Es ist für die Wiederherstellung nach Wechseln zwischen Konto und API-Key gedacht.",
+      "repairFailedWithError": "Reparatur der Sichtbarkeit fehlgeschlagen: {{error}}"
     },
     "accountNote": {
       "title": "Kontonotiz",
@@ -2957,6 +3024,13 @@
       "selectAllAccounts": "Alle Konten wählen",
       "selectReady": "OK-Konten wählen",
       "clearSelection": "Auswahl löschen"
+    },
+    "autoRepairMode": {
+      "label": "Auto-Reparaturlogik",
+      "tooltip": "Legt fest, welche Logik beim Wechsel die Sitzbarkeit repariert",
+      "legacyBefore4eb75d96": "Vor 4eb75d96",
+      "legacy4eb75d96": "Logik 4eb75d96",
+      "current": "Aktuelle Logik"
     }
   },
   "githubCopilot": {
@@ -3228,6 +3302,10 @@
       "title": "Filter-Merker",
       "enable": "Filter in der Kontoübersicht merken (ohne Suche)",
       "hint": "Standardmäßig aus. Wenn aktiviert, werden Filter, Tags und Sortierung pro Plattform gespeichert."
+    },
+    "claudeRefreshInterval": "Kontingent automatisch aktualisieren",
+    "claude": {
+      "appPath": "Claude Desktop-Pfad"
     }
   },
   "quotaAlert": {
@@ -3766,7 +3844,11 @@
       "resetsIn": "Zurückgesetzt in {{relative}}",
       "resetsSoon": "Wird bald zurückgesetzt",
       "resetsUnknown": "Zeitpunkt der Zurücksetzung unbekannt",
-      "onDemand": "Bei Bedarf"
+      "onDemand": "Bei Bedarf",
+      "gemini5h": "5h",
+      "geminiWeekly": "Weekly",
+      "claude5h": "5h",
+      "claudeWeekly": "Weekly"
     },
     "title": "Gemini Cli-Kontoverwaltung",
     "instances": {
@@ -4504,6 +4586,16 @@
       "queryFailed": "Kontingentprüfung fehlgeschlagen: {{error}}",
       "saveFailed": "Schreiben fehlgeschlagen: {{error}}"
     },
+    "models": {
+      "title": "Verfügbare Modelle",
+      "desc": "Wird vom Modell-Endpunkt des aktuellen API Key geladen und an Codex oder Claude CLI übergeben.",
+      "count": "{{count}} Modelle",
+      "loading": "Lädt",
+      "loadingDesc": "Modellliste wird mit dem aktuellen API Key geladen...",
+      "empty": "API Key eingeben, um verfügbare Modelle zu laden.",
+      "emptyFromKey": "Der aktuelle API Key hat keine Modelle zurückgegeben.",
+      "queryFailed": "Modellliste konnte nicht geladen werden: {{error}}"
+    },
     "keyManager": {
       "title": "Schlüsselverwaltung",
       "desc": "Speichern Sie API Keys zum schnellen Wechsel und zur automatischen Kontingentprüfung.",
@@ -4516,9 +4608,202 @@
       "editAlias": "Edit alias​",
       "renamePlaceholder": "Enter alias...​",
       "createdAt": "Hinzugefügt {{time}}",
-      "saveFlash": "Gerade gespeichert"
+      "saveFlash": "Gerade gespeichert",
+      "addingToCodex": "Wird zu Codex hinzugefügt...",
+      "addedToCodex": "Zu Codex hinzugefügt",
+      "addToCodexFailed": "Codex-Import fehlgeschlagen: {{error}}",
+      "addingToClaude": "Wird zu Claude CLI hinzugefügt...",
+      "addedToClaude": "Zu Claude CLI hinzugefügt",
+      "addToClaudeFailed": "Claude-CLI-Import fehlgeschlagen: {{error}}",
+      "codexAdded": "Codex hinzugefügt",
+      "claudeAdded": "Claude hinzugefügt",
+      "addToCodex": "Zu Codex",
+      "addToClaude": "Zu Claude CLI",
+      "codexShort": "Codex",
+      "claudeShort": "Claude CLI"
     },
     "copyKey": "Copy Key​",
     "clearKey": "Clear input​"
+  },
+  "claude": {
+    "import": {
+      "localSuccess": "{{count}} lokale Claude Desktop Anmeldung(en) importiert",
+      "localClient": "Aktuellen Desktop importieren",
+      "jsonLabel": "JSON-Daten",
+      "jsonPlaceholder": "Exportiertes Claude-Konto-JSON einfügen",
+      "localDesc": "Liest den aktuellen Anmeldestatus der offiziellen Claude Desktop App und speichert ihn als lokalen Kontoschnappschuss in diesem Tool.",
+      "desktopJsonPlaceholder": "Exportiertes Claude Desktop-Konto-JSON einfügen",
+      "cliJsonPlaceholder": "Exportiertes Claude CLI-Konto-JSON einfügen"
+    },
+    "deleteCurrentDisabled": "Aktuelles Konto kann nicht gelöscht werden",
+    "flowNotice": {
+      "title": "Claude-Konten verwalten",
+      "desc": "Dieses Tool verwaltet den Anmeldestatus von Claude Desktop und Anthropic API Keys. Die Desktop-Anmeldung erfolgt im Autorisierungsfenster dieser Plattform und wird zuerst lokal gespeichert; erst beim Kontowechsel wird sie in die offizielle Claude Desktop App geschrieben.",
+      "permission": "Berechtigungen: Lesen und Schreiben im Datenverzeichnis der offiziellen Claude Desktop App. API Keys und Desktop-Schnappschüsse werden in den lokalen Kontodaten dieses Tools gespeichert.",
+      "network": "Netzwerk: Das Desktop-Anmeldefenster öffnet claude.ai; Kontoaktualisierungen können Claude Web Schnittstellen anfragen. Der API-Key-Import selbst nutzt kein Netzwerk.",
+      "desktopDesc": "Dieses Tool verwaltet den Anmeldestatus von Claude Desktop. Die Anmeldung wird zuerst lokal gespeichert und erst beim Kontowechsel in die offizielle Claude Desktop-App geschrieben.",
+      "cliDesc": "Dieses Tool verwaltet Claude Code OAuth und API Keys mehrerer Anbieter. OAuth-Wechsel schreiben in die lokale Claude-Code-Konfiguration; API Keys schreiben Anbieter-env-Werte in Claude Code settings.json.",
+      "desktopPermission": "Berechtigungen: Lesen/Schreiben im Datenverzeichnis der offiziellen Claude Desktop-App. Desktop-Schnappschüsse werden in den lokalen Kontodaten dieses Tools gespeichert.",
+      "cliPermission": "Berechtigungsumfang: lokale Claude-Code-Konfiguration und Claude-Code-Anmeldedaten im macOS Keychain lesen/schreiben; API-Key-Konten werden lokal in diesem Tool gespeichert und beim Wechseln oder Starten der CLI als Klartext-env in settings.json geschrieben.",
+      "desktopNetwork": "Netzwerk: Das Desktop-Anmeldefenster öffnet claude.ai; Kontoaktualisierungen können Claude Web-Endpunkte anfragen.",
+      "cliNetwork": "Netzwerk: OAuth nutzt offizielle Claude-Autorisierung sowie token/profile/usage-Endpunkte; API-Key-Import ist offline, danach kontaktiert Claude CLI den gewählten Provider."
+    },
+    "search": "Claude-Konten suchen...",
+    "noAccounts": "Keine Claude-Konten",
+    "addAccount": {
+      "title": "Claude-Konto hinzufügen",
+      "desktopTitle": "Claude Desktop-Konto hinzufügen",
+      "cliTitle": "Claude CLI-Konto hinzufügen"
+    },
+    "deleteConfirm": "Claude-Konto {{email}} löschen?",
+    "switch": {
+      "success": "Erfolgreich gewechselt"
+    },
+    "instances": {
+      "unsupportedDescPlatform": "Mehrere Claude Desktop-Instanzen werden nur unter macOS, Windows und Linux unterstützt.",
+      "launchDialogTitle": "Instanz starten",
+      "launchCommand": "Startbefehl",
+      "executeInTerminal": "Im Terminal ausführen",
+      "startSuccess": "Claude Desktop wurde gestartet"
+    },
+    "quota": {
+      "title": "Kontingent",
+      "fiveHour": "Aktuelle Sitzung",
+      "sevenDay": "Aktuelle Woche (alle Modelle)",
+      "sonnet": "Sonnet 7 Tg.",
+      "extra": "Zusatznutzung",
+      "empty": "Kein Kontingent",
+      "unsupported": "Nicht aktualisierbar",
+      "updatedAt": "Aktualisiert: {{time}}",
+      "resetAt": "{{label}} zurückgesetzt: {{time}}",
+      "refreshSuccess": "Kontingent aktualisiert",
+      "refreshAllDone": "Kontingent aktualisiert",
+      "refreshFailed": "Kontingent-Refresh fehlgeschlagen: {{error}}",
+      "refreshWithWarning": "Kontingent-Refresh fehlgeschlagen: {{error}}",
+      "notUpdated": "Kontingent nicht aktualisiert",
+      "updated": "Aktualisiert",
+      "notUpdatedShort": "Nicht aktualisiert"
+    },
+    "addTabs": {
+      "desktop": "Desk",
+      "oauth": "OAuth",
+      "apiKey": "API-Schlüssel",
+      "import": "Lokal/JSON"
+    },
+    "authMode": {
+      "oauth": "OAuth-Modus",
+      "setup_token": "Setup-Token",
+      "api_key": "API-Schlüssel",
+      "desktop_oauth": "Desktop-Login"
+    },
+    "apiKey": {
+      "desc": "Claude CLI API Key als eigene Zugangsdaten speichern. Beim Wechseln oder Starten der CLI werden Anbieter-env-Werte in Claude Code settings.json geschrieben, nicht in den Claude-Desktop-Anmeldestatus.",
+      "nameLabel": "Kontoname",
+      "namePlaceholder": "Optional, z. B. APIKEY.FUN",
+      "keyLabel": "API-Schlüssel",
+      "placeholder": "Provider-API-Key einfügen",
+      "hide": "API Key verbergen",
+      "show": "API Key anzeigen",
+      "hint": "API-Key-Konten sind nur für Claude CLI. Sie werden als Klartext-env in Claude Code settings.json geschrieben, beeinflussen Claude Desktop nicht und unterstützen keine Abo-Kontingentaktualisierung.",
+      "importAction": "API Key importieren",
+      "required": "API Key eingeben",
+      "importSuccess": "Claude API-Key-Konto importiert: {{name}}",
+      "quotaUnsupported": "API-Key-Konten unterstützen keine Aktualisierung",
+      "switchDisabled": "API-Key-Konten können nicht zu Claude Desktop wechseln",
+      "cliUnsupported": "API-Key-Konten können Claude CLI nicht starten",
+      "providerLabel": "Anbieter",
+      "customProvider": "Benutzerdefiniert",
+      "endpointLabel": "Provider-Endpunkt",
+      "officialEndpoint": "Offizieller Standard",
+      "baseUrlLabel": "Basis-URL",
+      "baseUrlPlaceholder": "Leer nutzt Anthropic-Standard",
+      "keyFieldLabel": "Auth-Feld",
+      "baseUrlInvalid": "Base URL ist keine gültige URL"
+    },
+    "desktopOAuth": {
+      "title": "Claude Desktop-Login",
+      "desc": "Claude-Login in diesem Tool; Google, Apple, E-Mail und free werden unterstützt.",
+      "start": "Login öffnen",
+      "hint": "Lokal speichern; erst beim Wechsel in Claude Desktop schreiben.",
+      "nameLabel": "Kontoname",
+      "namePlaceholder": "Optional, z. B. Claude Free",
+      "waiting": "Im Claude-Fenster anmelden, dann hier Import abschließen.",
+      "profileDir": "Isoliertes profile-Verzeichnis",
+      "complete": "Import abschließen",
+      "localTitle": "Aktuelles Desktop importieren",
+      "localDesc": "Aktuelle Claude Desktop-Anmeldung als lokalen Snapshot kopieren.",
+      "localAction": "Importieren",
+      "localSuccess": "Lokale Claude Desktop-Anmeldung importiert: {{name}}",
+      "importSuccess": "Claude Desktop-Anmeldung importiert: {{name}}",
+      "switchHint": "Zum offiziellen Claude Desktop wechseln",
+      "planUnknown": "Abo unbekannt"
+    },
+    "oauth": {
+      "title": "Claude OAuth-Autorisierung",
+      "desc": "Öffne die offizielle Claude OAuth-Autorisierungsseite und füge danach Rückruflink oder Code ein, um das Konto zu importieren.",
+      "start": "OAuth autorisieren",
+      "proRequiredHint": "Claude OAuth wird normalerweise für Claude Code verwendet. Wenn die Seite bei Upgrade oder fehlender Berechtigung stehen bleibt, nutze Claude Desktop-Anmeldung.",
+      "openInstruction": "Klicke unten auf die Schaltfläche und schließe die Claude-OAuth-Autorisierung im Browser ab.",
+      "waiting": "Füge nach Abschluss die endgültige Seitenadresse oder den angezeigten Code unten ein.",
+      "authUrl": "Autorisierungslink",
+      "preparing": "Autorisierungslink wird erstellt...",
+      "openInBrowser": "Im Browser öffnen",
+      "openFailed": "Autorisierungslink konnte nicht geöffnet werden: {{error}}",
+      "callbackPlaceholder": "Rückruflink oder Autorisierungscode einfügen",
+      "callbackRequired": "Füge nach der Autorisierung den Rückruflink oder Code ein",
+      "authorizeUrlNotCallback": "Das ist der Autorisierungs-Einstiegslink oben, nicht der Code nach Abschluss. Schließe die Autorisierung zuerst im Browser ab und kopiere dann die endgültige Seitenadresse oder den angezeigten Code.",
+      "complete": "Import abschließen",
+      "emailPlaceholder": "E-Mail (ausfüllen, falls nicht automatisch erkannt)",
+      "importSuccess": "Claude OAuth-Autorisierung importiert: {{name}}"
+    },
+    "plan": {
+      "label": "Abo-Kennzeichen",
+      "selectPlaceholder": "Auswählen",
+      "updateFailed": "Abo-Kennzeichen konnte nicht aktualisiert werden: {{error}}"
+    },
+    "legacyOAuth": {
+      "switchDisabled": "Alte OAuth-Konten können nicht zu Claude Desktop wechseln",
+      "quotaUnsupported": "Alte OAuth-Konten unterstützen keine Aktualisierung mehr",
+      "cliUnsupported": "Alte OAuth-Konten können Claude CLI nicht starten"
+    },
+    "cli": {
+      "quickLaunch": "CLI starten",
+      "selectWorkingDir": "Claude-CLI-Arbeitsordner wählen",
+      "launchSuccess": "Claude CLI wurde gestartet",
+      "prepared": "Claude CLI ist bereit",
+      "launchFailed": "Claude CLI konnte nicht gestartet werden: {{error}}",
+      "localTitle": "Aktuellen Claude Code importieren",
+      "localDesc": "Liest den aktuellen lokalen OAuth-Anmeldestatus von Claude Code und kopiert ihn als lokalen Kontoschnappschuss.",
+      "localSuccess": "Lokale Claude Code-Anmeldung importiert: {{name}}"
+    },
+    "accountNote": {
+      "title": "Kontonotiz",
+      "desc": "Lokale Notiz für {{email}} hinzufügen, damit das Konto beim Wechseln leichter erkennbar ist.",
+      "label": "Kontonotiz",
+      "placeholder": "Beispiel: Free Hauptkonto, Max 20x, Teamkonto",
+      "saved": "Kontonotiz gespeichert",
+      "saveFailed": "Kontonotiz konnte nicht gespeichert werden: {{error}}",
+      "emptyTitle": "Kontonotiz eintragen",
+      "short": "Notiz",
+      "addShort": "Notiz"
+    },
+    "account": {
+      "signedInWith": "Angemeldet mit {{provider}}",
+      "userId": "Benutzer-ID",
+      "nickname": "Spitzname"
+    },
+    "selection": {
+      "selected": "{{count}} ausgewählt"
+    },
+    "deleteSelectedLabel": "{{count}} Konten",
+    "subPlatform": {
+      "label": "Claude-Unterplattform",
+      "desktop": "Claude Desktop-App",
+      "cli": "Claude-Befehlszeile"
+    },
+    "searchDesktop": "Claude Desktop-Konten suchen...",
+    "searchCli": "Claude CLI-Konten suchen...",
+    "noDesktopAccounts": "Noch keine Claude Desktop-Konten",
+    "noCliAccounts": "Noch keine Claude CLI-Konten"
   }
 }

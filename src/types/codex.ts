@@ -160,10 +160,64 @@ export interface CodexSessionVisibilityRepairItem {
   targetProvider: string;
   changedRolloutFileCount: number;
   updatedSqliteRowCount: number;
+  updatedSqliteTimestampRowCount: number;
   addedSessionIndexEntryCount: number;
+  updatedSessionIndexEntryCount: number;
   skippedSqliteFile: boolean;
+  metadataRebuildFailed: boolean;
   backupDir?: string | null;
   running: boolean;
+}
+
+export type CodexSessionVisibilityRepairMode = 'quick' | 'deep';
+export type CodexSessionVisibilityAutoRepairMode =
+  | 'legacy_before_4eb75d96'
+  | 'legacy_4eb75d96'
+  | 'current';
+
+export type CodexSessionVisibilityRepairProviderSource = 'config' | 'rollout' | 'sqlite';
+
+export interface CodexSessionVisibilityRepairProviderOption {
+  id: string;
+  sources: CodexSessionVisibilityRepairProviderSource[];
+  isDefault: boolean;
+}
+
+export interface CodexSessionVisibilityRepairProviderList {
+  defaultProvider: string;
+  providers: CodexSessionVisibilityRepairProviderOption[];
+}
+
+export interface CodexSessionVisibilityRepairInstanceOption {
+  id: string;
+  name: string;
+  userDataDir: string;
+  currentProvider: string;
+  isDefault: boolean;
+  running: boolean;
+}
+
+export interface CodexSessionVisibilityRepairInstanceList {
+  defaultInstanceId: string;
+  instances: CodexSessionVisibilityRepairInstanceOption[];
+}
+
+export interface CodexSessionVisibilityRepairRequestOptions {
+  targetProvider?: string | null;
+  targetInstanceId?: string | null;
+  repairInstanceIds?: string[] | null;
+  sessionIds?: string[] | null;
+}
+
+export interface CodexSessionVisibilityRepairProgress {
+  runId?: string | null;
+  mode: CodexSessionVisibilityRepairMode;
+  stage: string;
+  percent: number;
+  current: number;
+  total: number;
+  instanceId?: string | null;
+  instanceName?: string | null;
 }
 
 export interface CodexSessionVisibilityRepairSummary {
@@ -171,8 +225,11 @@ export interface CodexSessionVisibilityRepairSummary {
   mutatedInstanceCount: number;
   changedRolloutFileCount: number;
   updatedSqliteRowCount: number;
+  updatedSqliteTimestampRowCount: number;
   addedSessionIndexEntryCount: number;
+  updatedSessionIndexEntryCount: number;
   skippedSqliteFileCount: number;
+  metadataRebuildFailedCount: number;
   items: CodexSessionVisibilityRepairItem[];
   backupDirs: string[];
   message: string;
@@ -440,6 +497,15 @@ export function isCodexNewApiAccount(account: CodexAccount): boolean {
       isCodexCockpitApiBaseUrl(account.api_base_url) ||
       planType === "COCKPIT API" ||
       planType === "NEW_API_EXCLUSIVE")
+  );
+}
+
+export function isCodexChatCompletionsApiKeyAccount(
+  account: CodexAccount,
+): boolean {
+  return (
+    isCodexApiKeyAccount(account) &&
+    (account.api_wire_api || "").trim().toLowerCase() === "chat_completions"
   );
 }
 

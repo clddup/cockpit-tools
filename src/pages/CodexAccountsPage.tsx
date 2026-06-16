@@ -91,6 +91,7 @@ import {
   getCodexSubscriptionPresentation,
   hasCodexAccountName,
   isCodexApiKeyAccount,
+  isCodexChatCompletionsApiKeyAccount,
   isCodexNewApiAccount,
   isCodexTeamLikePlan,
   type CodexApiProviderMode,
@@ -113,6 +114,11 @@ import {
 } from "../components/CodexOverviewTabsHeader";
 import { CodexInstancesContent } from "./CodexInstancesPage";
 import { CodexSessionManager } from "../components/codex/CodexSessionManager";
+import {
+  buildCodexSessionVisibilityInitialProgress,
+  CodexSessionVisibilityRepairProgressView,
+  createCodexSessionVisibilityRepairRunId,
+} from "../components/codex/CodexSessionVisibilityRepairModal";
 import { CodexWakeupContent } from "../components/codex/CodexWakeupContent";
 import { CodexModelProviderManager } from "../components/codex/CodexModelProviderManager";
 import { CodexSpeedSelect } from "../components/codex/CodexSpeedSelect";
@@ -128,9 +134,14 @@ import {
   type SingleSelectFilterOption,
 } from "../components/SingleSelectFilterDropdown";
 import { SingleSelectDropdown } from "../components/SingleSelectDropdown";
-import type { CodexAccount, CodexAppSpeed } from "../types/codex";
+import type {
+  CodexAccount,
+  CodexAppSpeed,
+  CodexSessionVisibilityRepairProgress,
+} from "../types/codex";
 import type {
   CodexLocalAccessAddressKind,
+  CodexLocalAccessAccountHealth,
   CodexLocalAccessCustomRoutingRule,
   CodexLocalAccessGatewayMode,
   CodexLocalAccessRoutingStrategy,
@@ -139,13 +150,13 @@ import type {
 } from "../types/codexLocalAccess";
 import {
   CODEX_API_SERVICE_BIND_ID,
+  CODEX_PROVIDER_GATEWAY_BIND_PREFIX,
   type InstanceProfile,
 } from "../types/instance";
 import {
   CODEX_CODE_REVIEW_QUOTA_VISIBILITY_CHANGED_EVENT,
   isCodexCodeReviewQuotaVisibleByDefault,
 } from "../utils/codexPreferences";
-import { formatCodexSessionVisibilityRepairMessage } from "../utils/codexSessionVisibility";
 import { emitAccountsChanged } from "../utils/accountSyncEvents";
 import { compareCurrentAccountFirst } from "../utils/currentAccountSort";
 import {
@@ -159,9 +170,16 @@ import {
   resolveCodexApiProviderPresetId,
 } from "../utils/codexProviderPresets";
 import {
+  APIKEY_FUN_PROVIDER_BASE_URL,
+  isApiKeyFunProviderBaseUrl,
   normalizeApiKeyFunOfficialUrl,
   resolveApiKeyFunWireApi,
 } from "../utils/apikeyFunLinks";
+import {
+  APIKEY_FUN_PREFILL_EVENT,
+  consumeApiKeyFunPrefill,
+  type ApiKeyFunPrefillPayload,
+} from "../utils/apiKeyFunPrefill";
 import { resolveCodexProviderCapabilityProfile } from "../utils/codexProviderGateway";
 import {
   formatCodexQuotaPoolPercent,
@@ -208,6 +226,7 @@ import {
   setCodexLocalAccessRiskNoticeDismissed,
   type CodexLocalAccessRiskNoticeAction,
 } from "../utils/codexLocalAccessRiskNotice";
+import { formatCodexSessionVisibilityRepairMessage } from "../utils/codexSessionVisibility";
 import md5 from "blueimp-md5";
 
 const CODEX_TOKEN_SINGLE_EXAMPLE = `{
@@ -298,9 +317,11 @@ type CodexApiKeyUsageState = {
   summary?: CodexModelProviderUsageSummary;
   error?: string;
   unavailable?: boolean;
+  updatedAt?: number;
 };
 
 const CODEX_API_KEY_USAGE_CACHE_KEY = "agtools.codex.apiKeyUsage.cache.v1";
+const CODEX_API_KEY_USAGE_AUTO_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 function readCodexApiKeyUsageCache(): Record<string, CodexApiKeyUsageState> {
   try {
@@ -315,12 +336,17 @@ function readCodexApiKeyUsageCache(): Record<string, CodexApiKeyUsageState> {
         summary?: CodexModelProviderUsageSummary;
         error?: string;
         unavailable?: boolean;
+        updatedAt?: number;
       };
       next[accountId] = {
         loading: false,
         summary: item.summary,
         error: typeof item.error === "string" ? item.error : undefined,
         unavailable: item.unavailable === true,
+        updatedAt:
+          typeof item.updatedAt === "number" && Number.isFinite(item.updatedAt)
+            ? item.updatedAt
+            : undefined,
       };
     });
     return next;
@@ -343,6 +369,7 @@ function writeCodexApiKeyUsageCache(
               summary: item.summary,
               error: item.error,
               unavailable: item.unavailable === true,
+              updatedAt: item.updatedAt,
             },
           ]),
         ),
@@ -380,18 +407,22 @@ interface LocalAccessAccountPoolHealthSummary {
   quotaLimited: number;
 }
 
-const BLOCKING_LOCAL_ACCESS_ACCOUNT_FAILURE_CATEGORIES = new Set([
+const ABNORMAL_LOCAL_ACCESS_ACCOUNT_FAILURE_CATEGORIES = new Set([
   "auth_unavailable",
   "auth_refresh_failed",
   "account_prepare_failed",
-  "free_account_restricted",
 ]);
 
-function isBlockingLocalAccessAccountFailureCategory(
-  category?: string | null,
+function isAbnormalLocalAccessAccountFailure(
+  health?: CodexLocalAccessAccountHealth,
 ): boolean {
   return Boolean(
-    category && BLOCKING_LOCAL_ACCESS_ACCOUNT_FAILURE_CATEGORIES.has(category),
+    health &&
+      health.consecutiveFailures >= 3 &&
+      health.lastFailureCategory &&
+      ABNORMAL_LOCAL_ACCESS_ACCOUNT_FAILURE_CATEGORIES.has(
+        health.lastFailureCategory,
+      ),
   );
 }
 
@@ -439,12 +470,17 @@ function persistLocalAccessGatewayGuideDismissed(): void {
     // ignore storage write failures
   }
 }
-type CodexLaunchCredentialKind = "api-key" | "api-service" | "account";
+
+type CodexLaunchCredentialKind = "api" | "api-key" | "api-service" | "account";
 type CodexLaunchCredentialType = "api" | "account";
+
 type CodexApiSwitchNoticeContext = {
   from: CodexLaunchCredentialKind;
   to: CodexLaunchCredentialKind;
 };
+
+const CODEX_SESSION_VISIBILITY_REPAIR_PROGRESS_EVENT =
+  "codex:session_visibility_repair_progress";
 
 function getCodexLaunchCredentialKind(
   account: CodexAccount,
@@ -456,6 +492,14 @@ function getCodexLaunchCredentialType(
   kind: CodexLaunchCredentialKind,
 ): CodexLaunchCredentialType {
   return kind === "account" ? "account" : "api";
+}
+
+function getCodexLaunchCredentialKindFromType(
+  type: string | null | undefined,
+): CodexLaunchCredentialKind | null {
+  if (type === "api") return "api";
+  if (type === "account") return "account";
+  return null;
 }
 
 type CockpitApiJsonRecord = Record<string, unknown>;
@@ -860,8 +904,10 @@ export function CodexAccountsPage() {
     useState(false);
   const [apiSwitchNoticeContext, setApiSwitchNoticeContext] =
     useState<CodexApiSwitchNoticeContext | null>(null);
-  const [apiSwitchNoticeRepairing, setApiSwitchNoticeRepairing] =
-    useState(false);
+  const [apiSwitchNoticeRepairRunId, setApiSwitchNoticeRepairRunId] =
+    useState<string | null>(null);
+  const [apiSwitchNoticeRepairProgress, setApiSwitchNoticeRepairProgress] =
+    useState<CodexSessionVisibilityRepairProgress | null>(null);
   const [apiSwitchNoticeRepairResult, setApiSwitchNoticeRepairResult] =
     useState<string | null>(null);
   const {
@@ -1334,6 +1380,51 @@ export function CodexAccountsPage() {
       );
     }
   }, []);
+
+  const resolveCurrentCodexLaunchCredentialKind =
+    useCallback(async (): Promise<CodexLaunchCredentialKind | null> => {
+      try {
+        const activeAccount = await codexService.getCurrentCodexAccount();
+        if (activeAccount) {
+          return getCodexLaunchCredentialKind(activeAccount);
+        }
+
+        const instances = await codexInstanceService.listInstances();
+        const defaultInstance = instances.find(
+          (instance) => instance.isDefault,
+        );
+        const bindAccountId = defaultInstance?.bindAccountId ?? "";
+        if (bindAccountId === CODEX_API_SERVICE_BIND_ID) {
+          return "api-service";
+        }
+        if (bindAccountId.startsWith(CODEX_PROVIDER_GATEWAY_BIND_PREFIX)) {
+          return "api-key";
+        }
+        return null;
+      } catch (error) {
+        console.warn(
+          "Failed to resolve current Codex launch credential kind:",
+          error,
+        );
+        return null;
+      }
+    }, []);
+
+  const shouldShowApiSwitchVisibilityNotice = useCallback(
+    (
+      currentKind: CodexLaunchCredentialKind | null,
+      targetKind: CodexLaunchCredentialKind | null,
+    ) => {
+      if (!currentKind || !targetKind) {
+        return false;
+      }
+      return (
+        getCodexLaunchCredentialType(currentKind) !==
+        getCodexLaunchCredentialType(targetKind)
+      );
+    },
+    [],
+  );
 
   const exportFormatOptions = useMemo<SingleSelectFilterOption[]>(
     () => [
@@ -1882,6 +1973,103 @@ export function CodexAccountsPage() {
     setFilterTypes([]);
   }, []);
 
+  const closeApiSwitchVisibilityNotice = useCallback(() => {
+    apiSwitchNoticeRepairSeqRef.current += 1;
+    if (apiSwitchNoticeAutoCloseTimerRef.current != null) {
+      window.clearTimeout(apiSwitchNoticeAutoCloseTimerRef.current);
+      apiSwitchNoticeAutoCloseTimerRef.current = null;
+    }
+    setApiSwitchNoticeContext(null);
+    setApiSwitchNoticeRepairRunId(null);
+    setApiSwitchNoticeRepairProgress(null);
+    setApiSwitchNoticeRepairResult(null);
+    setApiSwitchNoticeError(null);
+  }, [setApiSwitchNoticeError]);
+
+  const runApiSwitchVisibilityRepair = useCallback(async () => {
+    const repairSeq = apiSwitchNoticeRepairSeqRef.current + 1;
+    const runId = createCodexSessionVisibilityRepairRunId();
+    apiSwitchNoticeRepairSeqRef.current = repairSeq;
+    if (apiSwitchNoticeAutoCloseTimerRef.current != null) {
+      window.clearTimeout(apiSwitchNoticeAutoCloseTimerRef.current);
+      apiSwitchNoticeAutoCloseTimerRef.current = null;
+    }
+    setApiSwitchNoticeError(null);
+    setApiSwitchNoticeRepairResult(null);
+    setApiSwitchNoticeRepairRunId(runId);
+    setApiSwitchNoticeRepairProgress(
+      buildCodexSessionVisibilityInitialProgress("quick", runId),
+    );
+    try {
+      const summary =
+        await codexInstanceService.repairSessionVisibilityAcrossInstances(
+          "quick",
+          runId,
+        );
+      if (apiSwitchNoticeRepairSeqRef.current === repairSeq) {
+        setApiSwitchNoticeRepairResult(
+          formatCodexSessionVisibilityRepairMessage(summary, t),
+        );
+        setApiSwitchNoticeRepairProgress((current) =>
+          current
+            ? {
+                ...current,
+                stage: "done",
+                percent: 100,
+              }
+            : buildCodexSessionVisibilityInitialProgress("quick", runId),
+        );
+        apiSwitchNoticeAutoCloseTimerRef.current = window.setTimeout(() => {
+          if (apiSwitchNoticeRepairSeqRef.current !== repairSeq) return;
+          apiSwitchNoticeRepairSeqRef.current += 1;
+          apiSwitchNoticeAutoCloseTimerRef.current = null;
+          setApiSwitchNoticeContext(null);
+          setApiSwitchNoticeRepairRunId(null);
+          setApiSwitchNoticeRepairProgress(null);
+          setApiSwitchNoticeRepairResult(null);
+          setApiSwitchNoticeError(null);
+        }, 1200);
+      }
+    } catch {
+      if (apiSwitchNoticeRepairSeqRef.current === repairSeq) {
+        setApiSwitchNoticeError(
+          t(
+            "codex.apiSwitchNotice.repairFailed",
+            "修复可见性失败。你仍可稍后在「会话管理」中重试。",
+          ),
+        );
+      }
+    }
+  }, [setApiSwitchNoticeError, t]);
+
+  const openApiSwitchVisibilityNotice = useCallback(
+    (context: CodexApiSwitchNoticeContext) => {
+      setApiSwitchNoticeContext(context);
+      setApiSwitchNoticeRepairResult(null);
+      setApiSwitchNoticeRepairRunId(null);
+      setApiSwitchNoticeRepairProgress(null);
+      setApiSwitchNoticeError(null);
+      void runApiSwitchVisibilityRepair();
+    },
+    [runApiSwitchVisibilityRepair, setApiSwitchNoticeError],
+  );
+
+  const formatCodexLaunchCredentialKindLabel = useCallback(
+    (kind: CodexLaunchCredentialKind) => {
+      if (kind === "api-service") {
+        return t("codex.apiSwitchNotice.type.apiService", "API 服务");
+      }
+      if (kind === "api-key") {
+        return t("codex.apiSwitchNotice.type.apiKey", "API Key");
+      }
+      if (kind === "api") {
+        return t("codex.apiSwitchNotice.type.api", "API 模式");
+      }
+      return t("codex.apiSwitchNotice.type.account", "账号");
+    },
+    [t],
+  );
+
   const validateApiKeyCredentialInputs = useCallback(
     (
       apiKeyRaw: string,
@@ -2167,6 +2355,7 @@ export function CodexAccountsPage() {
   const [apiKeyUsageMap, setApiKeyUsageMap] = useState<
     Record<string, CodexApiKeyUsageState>
   >(() => readCodexApiKeyUsageCache());
+  const apiKeyUsageInFlightRef = useRef<Set<string>>(new Set());
   const [managedProviderId, setManagedProviderId] = useState<string>("");
   const [managedProviderApiKeyId, setManagedProviderApiKeyId] =
     useState<string>("");
@@ -2252,10 +2441,6 @@ export function CodexAccountsPage() {
   const [customSortDropTargetId, setCustomSortDropTargetId] = useState<
     string | null
   >(null);
-  const repairSessionVisibilityAcrossInstances = useCodexInstanceStore(
-    (state) => state.repairSessionVisibilityAcrossInstances,
-  );
-
   const showAddModalRef = useRef(showAddModal);
   const addTabRef = useRef(addTab);
   const addStatusRef = useRef(addStatus);
@@ -2267,6 +2452,10 @@ export function CodexAccountsPage() {
   const inlineRenameDiscardRef = useRef(false);
   const apiSwitchNoticeRepairSeqRef = useRef(0);
   const apiSwitchNoticeAutoCloseTimerRef = useRef<number | null>(null);
+  const skipManagedProviderApiKeyAutofillRef = useRef(false);
+  const apiKeyFunPrefillModelCatalogRef = useRef<string[] | null>(null);
+  const pendingApiKeyFunCodexPrefillRef =
+    useRef<ApiKeyFunPrefillPayload | null>(null);
 
   useEffect(
     () => () => {
@@ -2277,6 +2466,34 @@ export function CodexAccountsPage() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!apiSwitchNoticeRepairRunId) return;
+
+    let disposed = false;
+    let unlisten: UnlistenFn | null = null;
+    void listen<CodexSessionVisibilityRepairProgress>(
+      CODEX_SESSION_VISIBILITY_REPAIR_PROGRESS_EVENT,
+      (event) => {
+        const payload = event.payload;
+        if (!payload || payload.runId !== apiSwitchNoticeRepairRunId) {
+          return;
+        }
+        setApiSwitchNoticeRepairProgress(payload);
+      },
+    ).then((nextUnlisten) => {
+      if (disposed) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [apiSwitchNoticeRepairRunId]);
 
   const selectedApiProviderPreset = useMemo(
     () => findCodexApiProviderPresetById(apiProviderPresetId),
@@ -2565,11 +2782,19 @@ export function CodexAccountsPage() {
         };
       }
 
+      const isApiKeyFunProvider = isApiKeyFunProviderBaseUrl(normalizedBaseUrl);
+      const apiKeyFunModelCatalog = isApiKeyFunProvider
+        ? (apiKeyFunPrefillModelCatalogRef.current ?? undefined)
+        : undefined;
       const trimmedName = customProviderName.trim();
+      const customProviderDisplayName =
+        trimmedName || (isApiKeyFunProvider ? "APIKEY.FUN" : undefined);
       return {
         apiProviderMode: "custom",
-        apiProviderName: trimmedName || undefined,
-        accountName: trimmedName || undefined,
+        apiProviderName: customProviderDisplayName,
+        apiModelCatalog: apiKeyFunModelCatalog,
+        apiWireApi: isApiKeyFunProvider ? "responses" : undefined,
+        accountName: customProviderDisplayName,
       };
     },
     [managedProviders, sponsorApiProviderTemplates],
@@ -2659,6 +2884,9 @@ export function CodexAccountsPage() {
 
   useEffect(() => {
     if (!showAddModal) {
+      if (!pendingApiKeyFunCodexPrefillRef.current) {
+        apiKeyFunPrefillModelCatalogRef.current = null;
+      }
       setApiKeyInput("");
       setApiKeyInputVisible(false);
       setApiBaseUrlInput(DEFAULT_CODEX_API_BASE_URL);
@@ -2708,7 +2936,12 @@ export function CodexAccountsPage() {
     setManagedProviderId((prev) =>
       prev === (matched?.id ?? "") ? prev : (matched?.id ?? ""),
     );
-    if (!matched || matched.apiKeys.length === 0) {
+    if (
+      !matched ||
+      matched.apiKeys.length === 0 ||
+      skipManagedProviderApiKeyAutofillRef.current
+    ) {
+      skipManagedProviderApiKeyAutofillRef.current = false;
       setManagedProviderApiKeyId("");
       return;
     }
@@ -3190,46 +3423,6 @@ export function CodexAccountsPage() {
 
   // ─── Codex-specific: Switch / Import ─────────────────────────────────
 
-  const resolveCurrentCodexLaunchCredentialKind =
-    useCallback(async (): Promise<CodexLaunchCredentialKind | null> => {
-      try {
-        const activeAccount = await codexService.getCurrentCodexAccount();
-        if (activeAccount) {
-          return getCodexLaunchCredentialKind(activeAccount);
-        }
-
-        const instances = await codexInstanceService.listInstances();
-        const defaultInstance = instances.find(
-          (instance) => instance.isDefault,
-        );
-        return defaultInstance?.bindAccountId === CODEX_API_SERVICE_BIND_ID
-          ? "api-service"
-          : null;
-      } catch (error) {
-        console.warn(
-          "Failed to resolve current Codex launch credential kind:",
-          error,
-        );
-        return null;
-      }
-    }, []);
-
-  const shouldShowApiSwitchVisibilityNotice = useCallback(
-    (
-      currentKind: CodexLaunchCredentialKind | null,
-      targetKind: CodexLaunchCredentialKind | null,
-    ) => {
-      if (!currentKind || !targetKind) {
-        return false;
-      }
-      return (
-        getCodexLaunchCredentialType(currentKind) !==
-        getCodexLaunchCredentialType(targetKind)
-      );
-    },
-    [],
-  );
-
   const resolveBoundOAuthAccount = useCallback(
     (account: CodexAccount) => {
       const boundId = (account.bound_oauth_account_id || "").trim();
@@ -3302,83 +3495,6 @@ export function CodexAccountsPage() {
     ],
   );
 
-  const closeApiSwitchVisibilityNotice = useCallback(() => {
-    apiSwitchNoticeRepairSeqRef.current += 1;
-    if (apiSwitchNoticeAutoCloseTimerRef.current != null) {
-      window.clearTimeout(apiSwitchNoticeAutoCloseTimerRef.current);
-      apiSwitchNoticeAutoCloseTimerRef.current = null;
-    }
-    setApiSwitchNoticeContext(null);
-    setApiSwitchNoticeRepairing(false);
-    setApiSwitchNoticeRepairResult(null);
-    setApiSwitchNoticeError(null);
-  }, [setApiSwitchNoticeError]);
-
-  const runApiSwitchVisibilityRepair = useCallback(async () => {
-    const repairSeq = apiSwitchNoticeRepairSeqRef.current + 1;
-    apiSwitchNoticeRepairSeqRef.current = repairSeq;
-    if (apiSwitchNoticeAutoCloseTimerRef.current != null) {
-      window.clearTimeout(apiSwitchNoticeAutoCloseTimerRef.current);
-      apiSwitchNoticeAutoCloseTimerRef.current = null;
-    }
-    setApiSwitchNoticeError(null);
-    setApiSwitchNoticeRepairResult(null);
-    setApiSwitchNoticeRepairing(true);
-    try {
-      const summary = await repairSessionVisibilityAcrossInstances();
-      if (apiSwitchNoticeRepairSeqRef.current === repairSeq) {
-        setApiSwitchNoticeRepairResult(
-          formatCodexSessionVisibilityRepairMessage(summary, t),
-        );
-        apiSwitchNoticeAutoCloseTimerRef.current = window.setTimeout(() => {
-          if (apiSwitchNoticeRepairSeqRef.current !== repairSeq) return;
-          apiSwitchNoticeRepairSeqRef.current += 1;
-          apiSwitchNoticeAutoCloseTimerRef.current = null;
-          setApiSwitchNoticeContext(null);
-          setApiSwitchNoticeRepairing(false);
-          setApiSwitchNoticeRepairResult(null);
-          setApiSwitchNoticeError(null);
-        }, 1200);
-      }
-    } catch {
-      if (apiSwitchNoticeRepairSeqRef.current === repairSeq) {
-        setApiSwitchNoticeError(
-          t(
-            "codex.apiSwitchNotice.repairFailed",
-            "自动修复失败。你仍可稍后在「会话管理」中使用「修复可见性」重试。",
-          ),
-        );
-      }
-    } finally {
-      if (apiSwitchNoticeRepairSeqRef.current === repairSeq) {
-        setApiSwitchNoticeRepairing(false);
-      }
-    }
-  }, [repairSessionVisibilityAcrossInstances, setApiSwitchNoticeError, t]);
-
-  const openApiSwitchVisibilityNotice = useCallback(
-    (context: CodexApiSwitchNoticeContext) => {
-      setApiSwitchNoticeContext(context);
-      setApiSwitchNoticeRepairResult(null);
-      setApiSwitchNoticeError(null);
-      void runApiSwitchVisibilityRepair();
-    },
-    [runApiSwitchVisibilityRepair, setApiSwitchNoticeError],
-  );
-
-  const formatCodexLaunchCredentialKindLabel = useCallback(
-    (kind: CodexLaunchCredentialKind) => {
-      if (kind === "api-service") {
-        return t("codex.apiSwitchNotice.type.apiService", "API 服务");
-      }
-      if (kind === "api-key") {
-        return t("codex.apiSwitchNotice.type.apiKey", "API Key");
-      }
-      return t("codex.apiSwitchNotice.type.account", "账号");
-    },
-    [t],
-  );
-
   const formatCodexAuthFailureMessage = useCallback(
     (rawError: unknown) => {
       const raw = String(rawError)
@@ -3446,7 +3562,20 @@ export function CodexAccountsPage() {
 
   const executeCodexAccountSwitch = useCallback(
     async (accountId: string, options?: { showSuccessMessage?: boolean }) => {
+      const flowStartedAt = performance.now();
+      console.info("[Codex Switch][UI] button loading started", {
+        accountId,
+      });
       const showSuccessMessage = options?.showSuccessMessage ?? true;
+      const currentKind = await resolveCurrentCodexLaunchCredentialKind();
+      const targetAccount = accounts.find((account) => account.id === accountId);
+      const targetKind = targetAccount
+        ? getCodexLaunchCredentialKind(targetAccount)
+        : null;
+      const shouldShowVisibilityNotice = shouldShowApiSwitchVisibilityNotice(
+        currentKind,
+        targetKind,
+      );
       setMessage(null);
       setSwitching(accountId);
       try {
@@ -3459,33 +3588,36 @@ export function CodexAccountsPage() {
             }),
           });
         }
+        if (shouldShowVisibilityNotice && currentKind && targetKind) {
+          openApiSwitchVisibilityNotice({
+            from: currentKind,
+            to: getCodexLaunchCredentialKind(account),
+          });
+        }
         return account;
       } finally {
         setSwitching(null);
+        console.info("[Codex Switch][UI] button loading finished", {
+          accountId,
+          elapsedMs: Math.round(performance.now() - flowStartedAt),
+        });
       }
     },
-    [maskAccountText, setMessage, switchAccount, t],
+    [
+      accounts,
+      maskAccountText,
+      openApiSwitchVisibilityNotice,
+      resolveCurrentCodexLaunchCredentialKind,
+      setMessage,
+      shouldShowApiSwitchVisibilityNotice,
+      switchAccount,
+      t,
+    ],
   );
 
   const handleSwitch = async (accountId: string) => {
-    const targetAccount = accounts.find((account) => account.id === accountId);
-
     try {
-      const currentKind = await resolveCurrentCodexLaunchCredentialKind();
-      const targetKind = targetAccount
-        ? getCodexLaunchCredentialKind(targetAccount)
-        : null;
-      const shouldShowVisibilityNotice = shouldShowApiSwitchVisibilityNotice(
-        currentKind,
-        targetKind,
-      );
-      const switchedAccount = await executeCodexAccountSwitch(accountId);
-      if (shouldShowVisibilityNotice && currentKind && targetKind) {
-        openApiSwitchVisibilityNotice({
-          from: currentKind,
-          to: getCodexLaunchCredentialKind(switchedAccount),
-        });
-      }
+      await executeCodexAccountSwitch(accountId);
     } catch (e) {
       setMessage({
         text: t("codex.switchFailed", {
@@ -3708,6 +3840,11 @@ export function CodexAccountsPage() {
         selected,
       );
       const prepared = await codexInstanceService.startInstance(instance.id);
+      if (prepared.codexLaunchCredentialChange) {
+        handleCodexInstanceLaunchCredentialChange(
+          prepared.codexLaunchCredentialChange,
+        );
+      }
       const result =
         await codexInstanceService.executeCodexInstanceLaunchCommand(
           prepared.id,
@@ -3752,6 +3889,11 @@ export function CodexAccountsPage() {
 
       const instance = await resolveCodexCliInstanceForApiService(selected);
       const prepared = await codexInstanceService.startInstance(instance.id);
+      if (prepared.codexLaunchCredentialChange) {
+        handleCodexInstanceLaunchCredentialChange(
+          prepared.codexLaunchCredentialChange,
+        );
+      }
       const result =
         await codexInstanceService.executeCodexInstanceLaunchCommand(
           prepared.id,
@@ -3772,6 +3914,18 @@ export function CodexAccountsPage() {
       setCliLaunchingAccountId(null);
     }
   };
+
+  const handleCodexInstanceLaunchCredentialChange = useCallback(
+    (change: { from: string; to: string }) => {
+      const from = getCodexLaunchCredentialKindFromType(change.from);
+      const to = getCodexLaunchCredentialKindFromType(change.to);
+      if (!shouldShowApiSwitchVisibilityNotice(from, to) || !from || !to) {
+        return;
+      }
+      openApiSwitchVisibilityNotice({ from, to });
+    },
+    [openApiSwitchVisibilityNotice, shouldShowApiSwitchVisibilityNotice],
+  );
 
   const handleImportFromLocal = async () => {
     page.setAddStatus("loading");
@@ -4118,6 +4272,91 @@ export function CodexAccountsPage() {
     [selectedManagedProvider],
   );
 
+  const applyApiKeyFunPrefill = useCallback(
+    (request: ApiKeyFunPrefillPayload) => {
+      if (request.target !== "codex") return;
+      const apiKey = request.apiKey.trim();
+      if (!apiKey) return;
+
+      pendingApiKeyFunCodexPrefillRef.current = request;
+      openCodexAddModal("apikey");
+    },
+    [openCodexAddModal],
+  );
+
+  useEffect(() => {
+    if (!showAddModal || addTab !== "apikey") return;
+    const request = pendingApiKeyFunCodexPrefillRef.current;
+    if (!request) return;
+    pendingApiKeyFunCodexPrefillRef.current = null;
+
+    const apiKey = request.apiKey.trim();
+    if (!apiKey) return;
+
+    const requestBaseUrl =
+      request.baseUrl?.trim() || APIKEY_FUN_PROVIDER_BASE_URL;
+    const normalizedRequestBaseUrl =
+      normalizeHttpBaseUrl(requestBaseUrl)?.toLowerCase() ?? "";
+    const sponsorTemplate =
+      sponsorApiProviderTemplates.find((template) => {
+        const normalizedTemplateBaseUrl =
+          normalizeHttpBaseUrl(template.baseUrl)?.toLowerCase() ?? "";
+        const searchable = [
+          template.name,
+          template.website,
+          template.apiKeyUrl,
+          template.baseUrl,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return (
+          normalizedTemplateBaseUrl === normalizedRequestBaseUrl ||
+          searchable.includes("apikey.fun") ||
+          searchable.includes("api.apikey.fun")
+        );
+      }) ?? null;
+
+    skipManagedProviderApiKeyAutofillRef.current = true;
+    apiKeyFunPrefillModelCatalogRef.current = request.modelCatalog ?? null;
+    setApiKeyInput(apiKey);
+    setApiKeyInputVisible(false);
+    setApiBaseUrlInput(sponsorTemplate?.baseUrl ?? requestBaseUrl);
+    setManagedProviderId("");
+    setManagedProviderApiKeyId("");
+    setApiProviderPresetId(sponsorTemplate?.id ?? CODEX_API_PROVIDER_CUSTOM_ID);
+    setNewManagedProviderNameInput(
+      sponsorTemplate?.name ?? request.providerName?.trim() ?? "APIKEY.FUN",
+    );
+    setAddStatus("idle");
+    setAddMessage(
+      t(
+        "apiKeyFun.prefill.codexReady",
+        "已带入 APIKEY.FUN 配置，请确认后添加到 Codex。",
+      ),
+    );
+  }, [
+    addTab,
+    setAddMessage,
+    setAddStatus,
+    showAddModal,
+    sponsorApiProviderTemplates,
+    t,
+  ]);
+
+  useEffect(() => {
+    const consumePrefill = () => {
+      const request = consumeApiKeyFunPrefill("codex");
+      if (request) {
+        applyApiKeyFunPrefill(request);
+      }
+    };
+    consumePrefill();
+    window.addEventListener(APIKEY_FUN_PREFILL_EVENT, consumePrefill);
+    return () => {
+      window.removeEventListener(APIKEY_FUN_PREFILL_EVENT, consumePrefill);
+    };
+  }, [applyApiKeyFunPrefill]);
+
   const handleSelectEditingApiProviderPreset = useCallback(
     (providerId: string) => {
       setEditingApiProviderPresetId(providerId);
@@ -4326,7 +4565,7 @@ export function CodexAccountsPage() {
             apiKey: validation.apiKey,
             apiKeyName: providerPayload.accountName,
             sourceTag: providerPayload.sponsorTemplate?.id ?? null,
-            modelCatalog: providerPayload.sponsorTemplate?.modelCatalog,
+            modelCatalog: providerPayload.apiModelCatalog,
             supportsVision: providerPayload.sponsorTemplate?.supportsVision,
             website: providerPayload.sponsorTemplate?.website,
             apiKeyUrl: providerPayload.sponsorTemplate?.apiKeyUrl,
@@ -4656,7 +4895,10 @@ export function CodexAccountsPage() {
 
   const resolveUsageProviderForApiKeyAccount = useCallback(
     (account: CodexAccount): CodexModelProvider | null => {
-      if (!isCodexApiKeyAccount(account) || isCodexNewApiAccount(account)) {
+      if (
+        !isCodexApiKeyAccount(account) ||
+        isCodexNewApiAccount(account)
+      ) {
         return null;
       }
       const provider =
@@ -4672,12 +4914,19 @@ export function CodexAccountsPage() {
 
   const refreshApiKeyUsage = useCallback(
     async (account: CodexAccount, provider?: CodexModelProvider | null) => {
+      if (isCodexChatCompletionsApiKeyAccount(account)) {
+        return;
+      }
       const targetProvider =
         provider ?? resolveUsageProviderForApiKeyAccount(account);
       const apiKey = (account.openai_api_key || "").trim();
       const baseUrl =
         targetProvider?.baseUrl.trim() || (account.api_base_url || "").trim();
       if (!baseUrl || !apiKey) return;
+      if (apiKeyUsageInFlightRef.current.has(account.id)) {
+        return;
+      }
+      apiKeyUsageInFlightRef.current.add(account.id);
       setApiKeyUsageMap((previous) => ({
         ...previous,
         [account.id]: {
@@ -4693,6 +4942,7 @@ export function CodexAccountsPage() {
           apiKey,
           integrationType: targetProvider?.integrationType ?? null,
         });
+        const updatedAt = Date.now();
         if (
           targetProvider &&
           (summary.mode === "sub2api" || summary.mode === "new_api") &&
@@ -4706,9 +4956,10 @@ export function CodexAccountsPage() {
         }
         setApiKeyUsageMap((previous) => ({
           ...previous,
-          [account.id]: { loading: false, summary },
+          [account.id]: { loading: false, summary, updatedAt },
         }));
       } catch (error) {
+        const updatedAt = Date.now();
         setApiKeyUsageMap((previous) => ({
           ...previous,
           [account.id]: {
@@ -4718,26 +4969,23 @@ export function CodexAccountsPage() {
               ? undefined
               : String(error).replace(/^Error:\s*/, ""),
             unavailable: isProviderUsageUnavailableError(error),
+            updatedAt,
           },
         }));
+      } finally {
+        apiKeyUsageInFlightRef.current.delete(account.id);
       }
     },
     [reloadManagedProviders, resolveUsageProviderForApiKeyAccount],
   );
 
-  const refreshApiKeyUsageByAccountId = useCallback(
-    async (accountId: string) => {
-      const account = accounts.find((item) => item.id === accountId);
-      if (!account) return;
-      const provider = resolveUsageProviderForApiKeyAccount(account);
-      await refreshApiKeyUsage(account, provider);
-    },
-    [accounts, refreshApiKeyUsage, resolveUsageProviderForApiKeyAccount],
-  );
-
   const canRefreshApiKeyUsage = useCallback(
     (account: CodexAccount, provider?: CodexModelProvider | null): boolean => {
-      if (!isCodexApiKeyAccount(account) || isCodexNewApiAccount(account)) {
+      if (
+        !isCodexApiKeyAccount(account) ||
+        isCodexNewApiAccount(account) ||
+        isCodexChatCompletionsApiKeyAccount(account)
+      ) {
         return false;
       }
       const targetProvider =
@@ -4750,24 +4998,43 @@ export function CodexAccountsPage() {
     [resolveUsageProviderForApiKeyAccount],
   );
 
-  const refreshApiKeyUsageForAccounts = useCallback(
-    async (targetAccounts: CodexAccount[]) => {
-      const apiKeyAccounts = targetAccounts.filter((account) => {
-        const provider = resolveUsageProviderForApiKeyAccount(account);
-        const baseUrl =
-          provider?.baseUrl.trim() || (account.api_base_url || "").trim();
-        return Boolean(baseUrl && (account.openai_api_key || "").trim());
-      });
-      await Promise.all(
-        apiKeyAccounts.map((account) =>
-          refreshApiKeyUsage(
-            account,
-            resolveUsageProviderForApiKeyAccount(account),
-          ),
-        ),
+  const shouldAutoRefreshApiKeyUsage = useCallback(
+    (account: CodexAccount, provider?: CodexModelProvider | null): boolean => {
+      if (!canRefreshApiKeyUsage(account, provider)) {
+        return false;
+      }
+      const state = apiKeyUsageMap[account.id];
+      if (state?.loading || apiKeyUsageInFlightRef.current.has(account.id)) {
+        return false;
+      }
+      const updatedAt = state?.updatedAt ?? 0;
+      return (
+        updatedAt <= 0 ||
+        Date.now() - updatedAt >= CODEX_API_KEY_USAGE_AUTO_REFRESH_INTERVAL_MS
       );
     },
-    [refreshApiKeyUsage, resolveUsageProviderForApiKeyAccount],
+    [apiKeyUsageMap, canRefreshApiKeyUsage],
+  );
+
+  const refreshApiKeyUsageByAccountId = useCallback(
+    async (accountId: string, options?: { force?: boolean }) => {
+      const account = accounts.find((item) => item.id === accountId);
+      if (!account) return;
+      const provider = resolveUsageProviderForApiKeyAccount(account);
+      if (
+        options?.force === false &&
+        !shouldAutoRefreshApiKeyUsage(account, provider)
+      ) {
+        return;
+      }
+      await refreshApiKeyUsage(account, provider);
+    },
+    [
+      accounts,
+      refreshApiKeyUsage,
+      resolveUsageProviderForApiKeyAccount,
+      shouldAutoRefreshApiKeyUsage,
+    ],
   );
 
   useEffect(() => {
@@ -4776,11 +5043,16 @@ export function CodexAccountsPage() {
 
   useEffect(() => {
     const accountIds = new Set(accounts.map((account) => account.id));
+    const chatCompletionsAccountIds = new Set(
+      accounts
+        .filter((account) => isCodexChatCompletionsApiKeyAccount(account))
+        .map((account) => account.id),
+    );
     setApiKeyUsageMap((previous) => {
       let changed = false;
       const next: Record<string, CodexApiKeyUsageState> = {};
       for (const [accountId, state] of Object.entries(previous)) {
-        if (accountIds.has(accountId)) {
+        if (accountIds.has(accountId) && !chatCompletionsAccountIds.has(accountId)) {
           next[accountId] = state;
         } else {
           changed = true;
@@ -4791,13 +5063,6 @@ export function CodexAccountsPage() {
   }, [accounts]);
 
   useEffect(() => {
-    const refreshOnQuotaChanged = async () => {
-      await refreshApiKeyUsageForAccounts(accounts);
-    };
-    const refreshOnAccountsChanged = async () => {
-      await refreshApiKeyUsageForAccounts(accounts);
-    };
-
     let unlistenAccountsChanged: UnlistenFn | null = null;
     let unlistenCurrentChanged: UnlistenFn | null = null;
 
@@ -4808,11 +5073,13 @@ export function CodexAccountsPage() {
         reason?: string;
       } | null;
       if (payload?.platformId !== "codex") return;
+      if (payload.reason === "delete") return;
       if (payload.accountId) {
-        await refreshApiKeyUsageByAccountId(payload.accountId);
+        await refreshApiKeyUsageByAccountId(payload.accountId, {
+          force: false,
+        });
         return;
       }
-      await refreshOnAccountsChanged();
     }).then((fn) => {
       unlistenAccountsChanged = fn;
     });
@@ -4821,22 +5088,24 @@ export function CodexAccountsPage() {
       const payload = event.payload as {
         platformId?: string;
         accountId?: string | null;
+        reason?: string;
       } | null;
       if (payload?.platformId !== "codex") return;
+      if (payload.reason === "delete") return;
       if (payload.accountId) {
-        await refreshApiKeyUsageByAccountId(payload.accountId);
+        await refreshApiKeyUsageByAccountId(payload.accountId, {
+          force: false,
+        });
       }
     }).then((fn) => {
       unlistenCurrentChanged = fn;
     });
 
-    void refreshOnQuotaChanged();
-
     return () => {
       unlistenAccountsChanged?.();
       unlistenCurrentChanged?.();
     };
-  }, [accounts, refreshApiKeyUsageByAccountId, refreshApiKeyUsageForAccounts]);
+  }, [refreshApiKeyUsageByAccountId]);
 
   const formatApiKeyUsageMoney = useCallback(
     (value?: number | null, unit?: string | null): string => {
@@ -5098,6 +5367,9 @@ export function CodexAccountsPage() {
       provider: CodexModelProvider | null,
       variant: "card" | "table" = "card",
     ): ReactElement => {
+      if (isCodexChatCompletionsApiKeyAccount(account)) {
+        return <></>;
+      }
       const usageState = apiKeyUsageMap[account.id];
       const summary = usageState?.summary;
       const loading = usageState?.loading === true;
@@ -5741,9 +6013,15 @@ export function CodexAccountsPage() {
   );
 
   const isAbnormalAccount = useCallback(
-    (account: CodexAccount) =>
-      Boolean(account.quota_error) || Boolean(account.requires_reauth),
-    [],
+    (account: CodexAccount) => {
+      if (account.requires_reauth === true) {
+        return true;
+      }
+      return shouldOfferReauthorizeAction(
+        resolveQuotaErrorMeta(account.quota_error),
+      );
+    },
+    [resolveQuotaErrorMeta, shouldOfferReauthorizeAction],
   );
 
   const localAccessAccountIdSet = useMemo(
@@ -5789,7 +6067,6 @@ export function CodexAccountsPage() {
         const health = healthById.get(accountId);
         if (!account) {
           summary.missing += 1;
-          summary.abnormal += 1;
           return;
         }
         if (health?.cooldowns?.length) {
@@ -5798,20 +6075,14 @@ export function CodexAccountsPage() {
         }
         if (isBlockingCodexQuotaError(account.quota_error)) {
           summary.quotaLimited += 1;
-          summary.abnormal += 1;
           return;
         }
-        if (
-          isBlockingLocalAccessAccountFailureCategory(
-            health?.lastFailureCategory,
-          )
-        ) {
+        if (isAbnormalLocalAccessAccountFailure(health)) {
           summary.authError += 1;
           summary.abnormal += 1;
           return;
         }
         if (health && !health.available) {
-          summary.abnormal += 1;
           return;
         }
         summary.available += 1;
@@ -5824,6 +6095,8 @@ export function CodexAccountsPage() {
       localAccessState?.accountHealth,
     ]);
   const localAccessAccountPoolHealthHasIssue =
+    localAccessAccountPoolHealthSummary.available <
+      localAccessAccountPoolHealthSummary.total ||
     localAccessAccountPoolHealthSummary.abnormal > 0 ||
     localAccessAccountPoolHealthSummary.cooldown > 0;
   const localAccessQuotaPoolLabels = useMemo(
@@ -6077,12 +6350,8 @@ export function CodexAccountsPage() {
       if (a.requires_reauth) {
         counts.AUTH_ERROR += 1;
       } else if (a.quota_error) {
-        const msg = (a.quota_error.message || "").toLowerCase();
-        const isNetworkFailure =
-          msg.includes("error sending request") &&
-          !a.quota_error.code &&
-          !/API 返回错误\s+\d{3}/i.test(a.quota_error.message);
-        if (isNetworkFailure) {
+        const quotaErrorMeta = resolveQuotaErrorMeta(a.quota_error);
+        if (quotaErrorMeta.isRefreshRequestFailure) {
           counts.REFRESH_FAILED += 1;
         } else {
           counts.QUOTA_ERROR += 1;
@@ -6090,7 +6359,7 @@ export function CodexAccountsPage() {
       }
     });
     return counts;
-  }, [isAbnormalAccount, overviewAccounts, resolvePlanKey]);
+  }, [isAbnormalAccount, overviewAccounts, resolvePlanKey, resolveQuotaErrorMeta]);
 
   const tierFilterOptions = useMemo<MultiSelectFilterOption[]>(
     () => [
@@ -6129,12 +6398,8 @@ export function CodexAccountsPage() {
       if (account.requires_reauth) {
         counts.AUTH_ERROR += 1;
       } else if (account.quota_error) {
-        const msg = (account.quota_error.message || "").toLowerCase();
-        const isNetworkFailure =
-          msg.includes("error sending request") &&
-          !account.quota_error.code &&
-          !/API 返回错误\s+\d{3}/i.test(account.quota_error.message);
-        if (isNetworkFailure) {
+        const quotaErrorMeta = resolveQuotaErrorMeta(account.quota_error);
+        if (quotaErrorMeta.isRefreshRequestFailure) {
           counts.REFRESH_FAILED += 1;
         } else {
           counts.QUOTA_ERROR += 1;
@@ -6142,7 +6407,7 @@ export function CodexAccountsPage() {
       }
     });
     return counts;
-  }, [isAbnormalAccount, oauthBindingEligibleAccounts, resolvePlanKey]);
+  }, [isAbnormalAccount, oauthBindingEligibleAccounts, resolvePlanKey, resolveQuotaErrorMeta]);
 
   const oauthBindingTierFilterOptions = useMemo<MultiSelectFilterOption[]>(
     () => [
@@ -6223,15 +6488,11 @@ export function CodexAccountsPage() {
             return true;
           }
           if (account.quota_error && !account.requires_reauth) {
-            const msg = (account.quota_error.message || "").toLowerCase();
-            const isNetworkFailure =
-              msg.includes("error sending request") &&
-              !account.quota_error.code &&
-              !/API 返回错误\s+\d{3}/i.test(account.quota_error.message);
-            if (selectedTypes.has("REFRESH_FAILED") && isNetworkFailure) {
+            const quotaErrorMeta = resolveQuotaErrorMeta(account.quota_error);
+            if (selectedTypes.has("REFRESH_FAILED") && quotaErrorMeta.isRefreshRequestFailure) {
               return true;
             }
-            if (selectedTypes.has("QUOTA_ERROR") && !isNetworkFailure) {
+            if (selectedTypes.has("QUOTA_ERROR") && !quotaErrorMeta.isRefreshRequestFailure) {
               return true;
             }
           }
@@ -6283,6 +6544,7 @@ export function CodexAccountsPage() {
     oauthBindingTagFilter,
     resolvePlanKey,
     resolvePresentation,
+    resolveQuotaErrorMeta,
   ]);
 
   const oauthBindingPagination = usePagination({
@@ -6766,6 +7028,13 @@ export function CodexAccountsPage() {
       }
       const confirmed = await requestLocalAccessRiskNotice("service");
       if (!confirmed) return;
+      const flowStartedAt = performance.now();
+      const currentKind = await resolveCurrentCodexLaunchCredentialKind();
+      const shouldShowVisibilityNotice = shouldShowApiSwitchVisibilityNotice(
+        currentKind,
+        "api-service",
+      );
+      console.info("[Codex API Service Switch][UI] button loading started");
       setLocalAccessStarting(true);
       try {
         const nextState =
@@ -6778,18 +7047,31 @@ export function CodexAccountsPage() {
             text: t("codex.localAccess.activateSuccess", "已切换到 API 服务"),
           });
         }
+        if (shouldShowVisibilityNotice && currentKind) {
+          openApiSwitchVisibilityNotice({
+            from: currentKind,
+            to: "api-service",
+          });
+        }
         return nextState;
       } catch (error) {
         throw new Error(String(error).replace(/^Error:\s*/, ""));
       } finally {
         setLocalAccessStarting(false);
+        console.info(
+          "[Codex API Service Switch][UI] button loading finished",
+          { elapsedMs: Math.round(performance.now() - flowStartedAt) },
+        );
       }
     },
     [
       fetchCurrentAccount,
       localAccessCollection,
+      openApiSwitchVisibilityNotice,
       requestLocalAccessRiskNotice,
+      resolveCurrentCodexLaunchCredentialKind,
       setMessage,
+      shouldShowApiSwitchVisibilityNotice,
       t,
     ],
   );
@@ -6810,19 +7092,9 @@ export function CodexAccountsPage() {
 
   const handleQuickActivateLocalAccess = useCallback(async () => {
     try {
-      const currentKind = await resolveCurrentCodexLaunchCredentialKind();
       const state = await handleActivateLocalAccess();
       if (!state) {
         return;
-      }
-      if (
-        shouldShowApiSwitchVisibilityNotice(currentKind, "api-service") &&
-        currentKind
-      ) {
-        openApiSwitchVisibilityNotice({
-          from: currentKind,
-          to: "api-service",
-        });
       }
     } catch (error) {
       setMessage({
@@ -6833,14 +7105,7 @@ export function CodexAccountsPage() {
         tone: "error",
       });
     }
-  }, [
-    handleActivateLocalAccess,
-    openApiSwitchVisibilityNotice,
-    resolveCurrentCodexLaunchCredentialKind,
-    setMessage,
-    shouldShowApiSwitchVisibilityNotice,
-    t,
-  ]);
+  }, [handleActivateLocalAccess, setMessage, t]);
 
   const handleQuickRefreshLocalAccessQuota = useCallback(async () => {
     if (!localAccessCollection) return;
@@ -7026,15 +7291,11 @@ export function CodexAccountsPage() {
             return true;
           }
           if (a.quota_error && !a.requires_reauth) {
-            const msg = (a.quota_error.message || "").toLowerCase();
-            const isNetworkFailure =
-              msg.includes("error sending request") &&
-              !a.quota_error.code &&
-              !/API 返回错误\s+\d{3}/i.test(a.quota_error.message);
-            if (selectedTypes.has("REFRESH_FAILED") && isNetworkFailure) {
+            const quotaErrorMeta = resolveQuotaErrorMeta(a.quota_error);
+            if (selectedTypes.has("REFRESH_FAILED") && quotaErrorMeta.isRefreshRequestFailure) {
               return true;
             }
-            if (selectedTypes.has("QUOTA_ERROR") && !isNetworkFailure) {
+            if (selectedTypes.has("QUOTA_ERROR") && !quotaErrorMeta.isRefreshRequestFailure) {
               return true;
             }
           }
@@ -7088,6 +7349,7 @@ export function CodexAccountsPage() {
     resolvePresentation,
     searchQuery,
     tagFilter,
+    resolveQuotaErrorMeta,
   ]);
 
   const filteredIds = useMemo(
@@ -7097,9 +7359,9 @@ export function CodexAccountsPage() {
   const errorAccountIds = useMemo(
     () =>
       filteredAccounts
-        .filter((account) => account.quota_error)
+        .filter(isAbnormalAccount)
         .map((account) => account.id),
-    [filteredAccounts],
+    [filteredAccounts, isAbnormalAccount],
   );
   const handleClearErrorAccounts = useCallback(() => {
     if (errorAccountIds.length === 0) return;
@@ -7451,6 +7713,8 @@ export function CodexAccountsPage() {
       const isCurrent = overviewCurrentAccountId === account.id;
       const isSelected = selected.has(account.id);
       const isApiKeyAccount = isCodexApiKeyAccount(account);
+      const isChatCompletionsApiKey =
+        isCodexChatCompletionsApiKeyAccount(account);
       const compactQuotaItems = resolveCompactQuotaItems(presentation);
       const subscriptionInfo = resolveSubscriptionPresentation(account);
       const showCompactExpiry =
@@ -7481,20 +7745,21 @@ export function CodexAccountsPage() {
             {maskAccountText(presentation.displayName)}
           </span>
           <div className="codex-compact-quotas">
-            {compactQuotaItems.map((item) => (
-              <span
-                key={`${account.id}-${item.key}`}
-                className={`codex-compact-quota codex-compact-quota-${item.key}`}
-                title={item.titleText}
-              >
-                <span className="codex-compact-dot" />
+            {!isChatCompletionsApiKey &&
+              compactQuotaItems.map((item) => (
                 <span
-                  className={`codex-compact-quota-value ${item.quotaClass}`}
+                  key={`${account.id}-${item.key}`}
+                  className={`codex-compact-quota codex-compact-quota-${item.key}`}
+                  title={item.titleText}
                 >
-                  {item.valueText}
+                  <span className="codex-compact-dot" />
+                  <span
+                    className={`codex-compact-quota-value ${item.quotaClass}`}
+                  >
+                    {item.valueText}
+                  </span>
                 </span>
-              </span>
-            ))}
+              ))}
             {showCompactExpiry && (
               <span className="codex-compact-expiry-wrap">
                 <span
@@ -7557,6 +7822,8 @@ export function CodexAccountsPage() {
       const isCurrent = overviewCurrentAccountId === account.id;
       const isApiKeyAccount = isCodexApiKeyAccount(account);
       const isNewApiAccount = isCodexNewApiAccount(account);
+      const isChatCompletionsApiKey =
+        isCodexChatCompletionsApiKeyAccount(account);
       const isEditingApiKeyName =
         isApiKeyAccount && editingApiKeyNameId === account.id;
       const isSavingApiKeyName = savingApiKeyNameId === account.id;
@@ -7618,13 +7885,16 @@ export function CodexAccountsPage() {
       const apiKeyUsageMode = resolveApiKeyUsageMode(
         apiKeyUsageMap[account.id]?.summary,
       );
+      const showApiKeyUsagePanel =
+        isApiKeyAccount && !isNewApiAccount && !isChatCompletionsApiKey;
       const isQuotaAwareApiKeyAccount =
-        isApiKeyAccount &&
-        !isNewApiAccount &&
+        showApiKeyUsagePanel &&
         !isSponsorApiKeyAccount &&
         (apiKeyUsageMode !== null ||
           apiKeyUsageProvider?.integrationType === "new_api" ||
           apiKeyUsageProvider?.integrationType === "sub2api");
+      const shouldRenderQuotaSection =
+        showApiKeyUsagePanel || !isApiKeyAccount || isNewApiAccount;
       const displayPlanClass = isSponsorApiKeyAccount
         ? "sponsor-api"
         : isQuotaAwareApiKeyAccount
@@ -7785,10 +8055,11 @@ export function CodexAccountsPage() {
               )}
             </div>
           )}
-          <div className="codex-quota-section">
-            {isApiKeyAccount && !isNewApiAccount ? (
-              renderApiKeyUsagePanel(account, apiKeyUsageProvider)
-            ) : (
+          {shouldRenderQuotaSection && (
+            <div className="codex-quota-section">
+              {showApiKeyUsagePanel ? (
+                renderApiKeyUsagePanel(account, apiKeyUsageProvider)
+              ) : (
               <>
                 {hasQuotaError && (
                   <div
@@ -7864,8 +8135,9 @@ export function CodexAccountsPage() {
                   </div>
                 )}
               </>
-            )}
-          </div>
+              )}
+            </div>
+          )}
           {!isApiKeyAccount && (
             <div
               className={`codex-subscription-footer ${subscriptionInfo.tone}`}
@@ -7934,7 +8206,7 @@ export function CodexAccountsPage() {
                     <Database size={14} />
                   </button>
                 )}
-                {isSponsorApiKeyAccount && (
+                {isSponsorApiKeyAccount && showApiKeyUsagePanel && (
                   <button
                     className="card-action-btn"
                     onClick={() => setApiKeyUsageDetailAccountId(account.id)}
@@ -8561,19 +8833,30 @@ export function CodexAccountsPage() {
                   {t("codex.localAccess.accountPoolHealth.title", "账号池")}
                 </span>
                 <span className="codex-local-access-health-summary-value">
-                  {t("codex.localAccess.accountPoolHealth.availableRatio", {
-                    available: localAccessAccountPoolHealthSummary.available,
-                    total: localAccessAccountPoolHealthSummary.total,
-                    defaultValue: "可用 {{available}}/{{total}}",
-                  })}
+                  {localAccessAccountPoolHealthSummary.available ===
+                    localAccessAccountPoolHealthSummary.total &&
+                  localAccessAccountPoolHealthSummary.abnormal === 0 &&
+                  localAccessAccountPoolHealthSummary.cooldown === 0
+                    ? t("codex.localAccess.accountPoolHealth.allAvailable", {
+                        count: localAccessAccountPoolHealthSummary.total,
+                        defaultValue: "全部可用 {{count}}",
+                      })
+                    : t("codex.localAccess.accountPoolHealth.availableRatio", {
+                        available: localAccessAccountPoolHealthSummary.available,
+                        total: localAccessAccountPoolHealthSummary.total,
+                        defaultValue: "可用 {{available}}/{{total}}",
+                      })}
                 </span>
-                <span className="codex-local-access-health-summary-value">
-                  {t("codex.localAccess.accountPoolHealth.issueSummary", {
-                    abnormal: localAccessAccountPoolHealthSummary.abnormal,
-                    cooldown: localAccessAccountPoolHealthSummary.cooldown,
-                    defaultValue: "异常 {{abnormal}} · 冷却 {{cooldown}}",
-                  })}
-                </span>
+                {(localAccessAccountPoolHealthSummary.abnormal > 0 ||
+                  localAccessAccountPoolHealthSummary.cooldown > 0) && (
+                  <span className="codex-local-access-health-summary-value">
+                    {t("codex.localAccess.accountPoolHealth.issueSummary", {
+                      abnormal: localAccessAccountPoolHealthSummary.abnormal,
+                      cooldown: localAccessAccountPoolHealthSummary.cooldown,
+                      defaultValue: "异常 {{abnormal}} · 冷却 {{cooldown}}",
+                    })}
+                  </span>
+                )}
               </div>
             )}
 
@@ -8862,6 +9145,8 @@ export function CodexAccountsPage() {
       const isCurrent = overviewCurrentAccountId === account.id;
       const isApiKeyAccount = isCodexApiKeyAccount(account);
       const isNewApiAccount = isCodexNewApiAccount(account);
+      const isChatCompletionsApiKey =
+        isCodexChatCompletionsApiKeyAccount(account);
       const isEditingApiKeyName =
         isApiKeyAccount && editingApiKeyNameId === account.id;
       const isSavingApiKeyName = savingApiKeyNameId === account.id;
@@ -8922,9 +9207,10 @@ export function CodexAccountsPage() {
       const apiKeyUsageMode = resolveApiKeyUsageMode(
         apiKeyUsageMap[account.id]?.summary,
       );
+      const showApiKeyUsagePanel =
+        isApiKeyAccount && !isNewApiAccount && !isChatCompletionsApiKey;
       const isQuotaAwareApiKeyAccount =
-        isApiKeyAccount &&
-        !isNewApiAccount &&
+        showApiKeyUsagePanel &&
         !isSponsorApiKeyAccount &&
         (apiKeyUsageMode !== null ||
           apiKeyUsageProvider?.integrationType === "new_api" ||
@@ -9134,8 +9420,10 @@ export function CodexAccountsPage() {
             )}
           </td>
           <td>
-            {isApiKeyAccount && !isNewApiAccount ? (
+            {showApiKeyUsagePanel ? (
               renderApiKeyUsagePanel(account, apiKeyUsageProvider, "table")
+            ) : isChatCompletionsApiKey ? (
+              <span className="codex-subscription-table-empty">-</span>
             ) : (
               <>
                 <div className="quota-grid">
@@ -9230,7 +9518,7 @@ export function CodexAccountsPage() {
                   <Database size={14} />
                 </button>
               )}
-              {isSponsorApiKeyAccount && (
+              {isSponsorApiKeyAccount && showApiKeyUsagePanel && (
                 <button
                   className="action-btn"
                   onClick={() => setApiKeyUsageDetailAccountId(account.id)}
@@ -12876,9 +13164,12 @@ export function CodexAccountsPage() {
                     {customSortAccounts.map((account, index) => {
                       const presentation = resolvePresentation(account);
                       const isCurrent = overviewCurrentAccountId === account.id;
+                      const isChatCompletionsApiKey =
+                        isCodexChatCompletionsApiKeyAccount(account);
                       const quotaItems =
-                        isCodexApiKeyAccount(account) &&
-                        !isCodexNewApiAccount(account)
+                        isChatCompletionsApiKey ||
+                        (isCodexApiKeyAccount(account) &&
+                          !isCodexNewApiAccount(account))
                           ? []
                           : presentation.quotaItems
                               .filter((item) => item.key !== "code_review")
@@ -12964,7 +13255,7 @@ export function CodexAccountsPage() {
                                       </strong>
                                     </span>
                                   ))
-                                ) : (
+                                ) : isChatCompletionsApiKey ? null : (
                                   <span className="codex-custom-sort-quota-empty">
                                     {t(
                                       "common.shared.quota.noData",
@@ -13282,76 +13573,6 @@ export function CodexAccountsPage() {
                       localAccessRiskNoticeAction,
                       t,
                     )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {apiSwitchNoticeContext && (
-            <div
-              className="modal-overlay codex-local-access-hide-confirm-overlay"
-              onClick={closeApiSwitchVisibilityNotice}
-            >
-              <div
-                className="modal codex-local-access-hide-confirm-modal codex-api-switch-notice-modal"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="modal-header">
-                  <h2>
-                    {t("codex.apiSwitchNotice.title", "Codex 会话不可见")}
-                  </h2>
-                  <button
-                    className="modal-close"
-                    onClick={closeApiSwitchVisibilityNotice}
-                    aria-label={t("common.close", "关闭")}
-                  >
-                    <X />
-                  </button>
-                </div>
-                <div className="modal-body">
-                  <ModalErrorMessage
-                    message={apiSwitchNoticeError}
-                    scrollKey={apiSwitchNoticeErrorScrollKey}
-                  />
-                  <p className="codex-local-access-hide-confirm-desc">
-                    {t(
-                      "codex.apiSwitchNotice.message",
-                      "检测到 Codex 已从 {{from}} 切换到 {{to}}。由于官方机制，API 与账号直接切换后，原有会话可能不会自动显示。正在自动修复会话可见性，后续也可以通过「会话管理」里的「修复可见性」功能修复。",
-                      {
-                        from: formatCodexLaunchCredentialKindLabel(
-                          apiSwitchNoticeContext.from,
-                        ),
-                        to: formatCodexLaunchCredentialKindLabel(
-                          apiSwitchNoticeContext.to,
-                        ),
-                      },
-                    )}
-                  </p>
-                  {apiSwitchNoticeRepairing && (
-                    <div className="codex-api-switch-notice-repair-status is-loading">
-                      <RefreshCw size={14} className="loading-spinner" />
-                      <span>
-                        {t(
-                          "codex.apiSwitchNotice.repairing",
-                          "正在修复 Codex 会话可见性...",
-                        )}
-                      </span>
-                    </div>
-                  )}
-                  {apiSwitchNoticeRepairResult && (
-                    <div className="codex-api-switch-notice-repair-status is-success">
-                      <Check size={14} />
-                      <span>{apiSwitchNoticeRepairResult}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="modal-footer codex-api-switch-notice-footer">
-                  <button
-                    className="btn btn-primary"
-                    onClick={closeApiSwitchVisibilityNotice}
-                  >
-                    {t("common.close", "关闭")}
                   </button>
                 </div>
               </div>
@@ -13680,7 +13901,10 @@ export function CodexAccountsPage() {
       )}
 
       {activeTab === "instances" && (
-        <CodexInstancesContent accountsForSelect={sortedAccountsForInstances} />
+        <CodexInstancesContent
+          accountsForSelect={sortedAccountsForInstances}
+          onLaunchCredentialChange={handleCodexInstanceLaunchCredentialChange}
+        />
       )}
 
       {activeTab === "sessions" && <CodexSessionManager />}
@@ -13705,6 +13929,66 @@ export function CodexAccountsPage() {
             await fetchCurrentAccount();
           }}
         />
+      )}
+
+      {apiSwitchNoticeContext && (
+        <div
+          className="modal-overlay codex-local-access-hide-confirm-overlay"
+          onClick={closeApiSwitchVisibilityNotice}
+        >
+          <div
+            className="modal codex-local-access-hide-confirm-modal codex-api-switch-notice-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2>{t("codex.apiSwitchNotice.title", "Codex 会话不可见")}</h2>
+              <button
+                className="modal-close"
+                onClick={closeApiSwitchVisibilityNotice}
+                aria-label={t("common.close", "关闭")}
+              >
+                <X />
+              </button>
+            </div>
+            <div className="modal-body">
+              <ModalErrorMessage
+                message={apiSwitchNoticeError}
+                scrollKey={apiSwitchNoticeErrorScrollKey}
+              />
+              <p className="codex-local-access-hide-confirm-desc">
+                {t("codex.apiSwitchNotice.message", {
+                  defaultValue:
+                    "检测到 Codex 已从 {{from}} 切换到 {{to}}。由于官方机制，这类切换后原有会话可能不会自动显示。正在自动修复会话可见性，后续也可以在「会话管理」中手动修复。",
+                  from: formatCodexLaunchCredentialKindLabel(
+                    apiSwitchNoticeContext.from,
+                  ),
+                  to: formatCodexLaunchCredentialKindLabel(
+                    apiSwitchNoticeContext.to,
+                  ),
+                })}
+              </p>
+              {apiSwitchNoticeRepairProgress && (
+                <CodexSessionVisibilityRepairProgressView
+                  progress={apiSwitchNoticeRepairProgress}
+                />
+              )}
+              {apiSwitchNoticeRepairResult && (
+                <div className="codex-api-switch-notice-repair-status is-success">
+                  <Check size={14} />
+                  <span>{apiSwitchNoticeRepairResult}</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer codex-api-switch-notice-footer">
+              <button
+                className="btn btn-primary"
+                onClick={closeApiSwitchVisibilityNotice}
+              >
+                {t("common.close", "关闭")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
