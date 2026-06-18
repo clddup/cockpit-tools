@@ -95,11 +95,18 @@ fn inject_bound_account_for_instance_start(
             Path::new(user_data_dir),
             backup_existing,
         ),
+        ClaudeAuthMode::DesktopGateway => {
+            modules::claude_account::restore_desktop_gateway_account_to_profile(
+                bind_id,
+                Path::new(user_data_dir),
+                backup_existing,
+            )
+        }
         ClaudeAuthMode::ApiKey => Err(
-            "Claude API Key 账号不能写入 Claude Desktop 登录态，请选择 Claude Desktop 登录账号或取消绑定。"
+            "Claude API Key 账号不能写入 Claude 登录态，请选择 Claude 登录账号或取消绑定。"
                 .to_string(),
         ),
-        _ => Err("旧 OAuth 账号已不再支持用于 Claude Desktop 实例，请重新添加 Claude Desktop 登录账号。"
+        _ => Err("旧 OAuth 账号已不再支持用于 Claude 实例，请重新添加 Claude 登录账号。"
             .to_string()),
     }
 }
@@ -117,9 +124,12 @@ fn inject_bound_account_for_cli_instance_start(
 
     let account = modules::claude_account::load_account(bind_id)
         .ok_or_else(|| format!("绑定账号不存在: {}", bind_id))?;
-    if account.auth_mode == ClaudeAuthMode::DesktopOAuth {
+    if matches!(
+        account.auth_mode,
+        ClaudeAuthMode::DesktopOAuth | ClaudeAuthMode::DesktopGateway
+    ) {
         return Err(
-            "Claude Desktop 登录账号不能写入 Claude CLI 实例，请选择 Claude CLI OAuth / API Key 账号。"
+            "Claude 登录账号不能写入 Claude CLI 实例，请选择 Claude CLI OAuth / API Key 账号。"
                 .to_string(),
         );
     }
@@ -127,7 +137,10 @@ fn inject_bound_account_for_cli_instance_start(
     let config_dir = Path::new(user_data_dir);
     let _ = modules::claude_account::sync_cli_account_from_config_dir_if_same(bind_id, config_dir)?;
     modules::claude_account::inject_to_claude_config(bind_id, Some(Path::new(user_data_dir)))?;
-    crate::modules::provider_current_state::set_current_account_id("claude_cli", Some(bind_id))?;
+    crate::modules::provider_current_state::set_current_account_id(
+        "claude_code_account",
+        Some(bind_id),
+    )?;
     Ok(())
 }
 
@@ -149,8 +162,8 @@ fn resolve_cli_env_for_bind_account(
         .ok_or_else(|| format!("绑定账号不存在: {}", bind_id))?;
     match account.auth_mode {
         ClaudeAuthMode::ApiKey => modules::claude_account::build_api_key_cli_env_map(&account),
-        ClaudeAuthMode::DesktopOAuth => Err(
-            "Claude Desktop 登录账号不能写入 Claude CLI 实例，请选择 Claude CLI OAuth / API Key 账号。"
+        ClaudeAuthMode::DesktopOAuth | ClaudeAuthMode::DesktopGateway => Err(
+            "Claude 登录账号不能写入 Claude CLI 实例，请选择 Claude CLI OAuth / API Key 账号。"
                 .to_string(),
         ),
         _ => Ok(BTreeMap::new()),

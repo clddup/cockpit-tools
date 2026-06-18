@@ -61,8 +61,8 @@ const PAGE_PLATFORM_MAP: Partial<Record<Page, PlatformId>> = {
   overview: 'antigravity',
   codex: 'codex',
   'codex-api-service': 'codex',
-  claude: 'claude',
-  'claude-cli': 'claude',
+  claude: 'claude_manager',
+  'claude-cli': 'claude_manager',
   zed: 'zed',
   'github-copilot': 'github-copilot',
   windsurf: 'windsurf',
@@ -108,11 +108,17 @@ function renderEntryIcon(entry: SideNavEntry, size: number) {
   }
 
   if (entry.group) {
-    const iconPlatform = entry.group.iconPlatformId ?? entry.targetPlatformId;
+    const iconPlatform = isAntigravitySuitePlatformIds(entry.group.platformIds)
+      ? entry.targetPlatformId
+      : entry.group.iconPlatformId ?? entry.targetPlatformId;
     return iconPlatform ? renderPlatformIcon(iconPlatform, size) : null;
   }
 
   return entry.targetPlatformId ? renderPlatformIcon(entry.targetPlatformId, size) : null;
+}
+
+function isAntigravitySuitePlatformIds(platformIds: PlatformId[]): boolean {
+  return platformIds.includes('antigravity') && platformIds.includes('antigravity_ide');
 }
 
 export function SideNav({
@@ -233,9 +239,12 @@ export function SideNav({
 
         const resolvedTargetPlatformId = resolveEntryDefaultPlatformId(entryId, platformGroups);
         const targetPlatformId =
-          resolvedTargetPlatformId && visiblePlatformIds.includes(resolvedTargetPlatformId)
-            ? resolvedTargetPlatformId
-            : visiblePlatformIds[0];
+          isAntigravitySuitePlatformIds(group.platformIds)
+            && visiblePlatformIds.includes(antigravityRuntimeTarget)
+            ? antigravityRuntimeTarget
+            : resolvedTargetPlatformId && visiblePlatformIds.includes(resolvedTargetPlatformId)
+              ? resolvedTargetPlatformId
+              : visiblePlatformIds[0];
         if (!targetPlatformId) {
           return null;
         }
@@ -275,6 +284,7 @@ export function SideNav({
     platformGroups,
     hiddenSet,
     isPlatformAvailable,
+    antigravityRuntimeTarget,
     t,
   ]);
 
@@ -574,7 +584,6 @@ export function SideNav({
         '经典布局会展示完整平台导航并支持折叠。你仍可在“设置 > 通用 > 侧边栏布局”中随时切换回原始布局。',
       ),
       width: 'sm',
-      closeOnOverlay: false,
       content: (
         <div className="side-nav-layout-switch-modal-content">
           <label className="side-nav-layout-switch-remember">

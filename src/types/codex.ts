@@ -203,6 +203,7 @@ export interface CodexSessionVisibilityRepairInstanceList {
 }
 
 export interface CodexSessionVisibilityRepairRequestOptions {
+  mode?: CodexSessionVisibilityRepairMode;
   targetProvider?: string | null;
   targetInstanceId?: string | null;
   repairInstanceIds?: string[] | null;
@@ -248,6 +249,11 @@ export interface CodexSessionRecord {
   updatedAt?: number | null;
   locationCount: number;
   locations: CodexSessionLocation[];
+}
+
+export interface CodexSessionSearchOptions {
+  titleQuery?: string | null;
+  contentQuery?: string | null;
 }
 
 export interface CodexSessionTokenStats {

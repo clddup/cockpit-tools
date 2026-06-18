@@ -8,8 +8,8 @@ import { SingleSelectDropdown, type SingleSelectOption } from "../SingleSelectDr
 import { useEscClose } from "../../hooks/useEscClose";
 import { useCodexInstanceStore } from "../../stores/useCodexInstanceStore";
 import type {
-  CodexSessionVisibilityRepairInstanceList,
   CodexSessionVisibilityRepairMode,
+  CodexSessionVisibilityRepairInstanceList,
   CodexSessionVisibilityRepairProgress,
   CodexSessionVisibilityRepairSummary,
 } from "../../types/codex";
@@ -43,8 +43,8 @@ function createRepairRunId() {
 }
 
 function buildInitialProgress(
-  mode: CodexSessionVisibilityRepairMode,
   runId: string,
+  mode: CodexSessionVisibilityRepairMode = "quick",
 ): CodexSessionVisibilityRepairProgress {
   return {
     runId,
@@ -57,10 +57,10 @@ function buildInitialProgress(
 }
 
 export function buildCodexSessionVisibilityInitialProgress(
-  mode: CodexSessionVisibilityRepairMode,
   runId: string,
+  mode: CodexSessionVisibilityRepairMode = "quick",
 ): CodexSessionVisibilityRepairProgress {
-  return buildInitialProgress(mode, runId);
+  return buildInitialProgress(runId, mode);
 }
 
 export function createCodexSessionVisibilityRepairRunId() {
@@ -212,6 +212,8 @@ export function CodexSessionVisibilityRepairModal({
   );
   const runIdRef = useRef<string | null>(null);
   const [status, setStatus] = useState<RepairStatus>("idle");
+  const [selectedMode, setSelectedMode] =
+    useState<CodexSessionVisibilityRepairMode>("quick");
   const [selectedInstanceScope, setSelectedInstanceScope] =
     useState<InstanceRepairScope>("target");
   const [selectedScope, setSelectedScope] = useState<RepairScope>("all");
@@ -261,6 +263,7 @@ export function CodexSessionVisibilityRepairModal({
   useEffect(() => {
     if (!open) {
       setStatus("idle");
+      setSelectedMode("quick");
       setSelectedInstanceScope("target");
       setSelectedScope("all");
       setInstanceList(null);
@@ -361,12 +364,13 @@ export function CodexSessionVisibilityRepairModal({
       selectedInstanceScope === "target" ? [selectedInstanceId] : null;
     runIdRef.current = runId;
     setStatus("running");
-    setProgress(buildInitialProgress("quick", runId));
+    setProgress(buildInitialProgress(runId, selectedMode));
     setResult(null);
     setError(null);
     onRunningChange?.(true);
     try {
-      const summary = await repairSessionVisibilityAcrossInstances("quick", runId, {
+      const summary = await repairSessionVisibilityAcrossInstances(runId, {
+        mode: selectedMode,
         targetInstanceId: selectedInstanceId,
         repairInstanceIds,
         sessionIds,
@@ -402,6 +406,7 @@ export function CodexSessionVisibilityRepairModal({
     effectiveScope,
     selectedInstanceScope,
     selectedInstanceId,
+    selectedMode,
     setError,
     t,
     uniqueSelectedSessionIds,
@@ -412,7 +417,6 @@ export function CodexSessionVisibilityRepairModal({
   return (
     <div
       className="modal-overlay codex-local-access-hide-confirm-overlay"
-      onClick={closeModal}
     >
       <div
         className="modal codex-local-access-hide-confirm-modal codex-api-switch-notice-modal"
@@ -439,6 +443,51 @@ export function CodexSessionVisibilityRepairModal({
               )}
           </p>
           <div className="codex-visibility-repair-options">
+            <div className="codex-visibility-repair-scope">
+              <span className="codex-visibility-repair-scope__title">
+                {t("codex.sessionManager.repairModal.modeTitle", "修复方式")}
+              </span>
+              <div className="codex-visibility-repair-scope__grid">
+                <button
+                  type="button"
+                  className={`codex-visibility-repair-scope-card${
+                    selectedMode === "quick" ? " is-selected" : ""
+                  }`}
+                  onClick={() => setSelectedMode("quick")}
+                  disabled={running}
+                  aria-pressed={selectedMode === "quick"}
+                >
+                  <strong>
+                    {t("codex.sessionManager.repairModal.modeQuick", "快速修复")}
+                  </strong>
+                  <small>
+                    {t(
+                      "codex.sessionManager.repairModal.modeQuickDesc",
+                      "只校正官方 state DB 和会话文件首条元数据，适合日常切号后恢复。",
+                    )}
+                  </small>
+                </button>
+                <button
+                  type="button"
+                  className={`codex-visibility-repair-scope-card${
+                    selectedMode === "deep" ? " is-selected" : ""
+                  }`}
+                  onClick={() => setSelectedMode("deep")}
+                  disabled={running}
+                  aria-pressed={selectedMode === "deep"}
+                >
+                  <strong>
+                    {t("codex.sessionManager.repairModal.modeDeep", "深度修复")}
+                  </strong>
+                  <small>
+                    {t(
+                      "codex.sessionManager.repairModal.modeDeepDesc",
+                      "保留当前完整元数据修复，适合快速修复后仍不可见时测试。",
+                    )}
+                  </small>
+                </button>
+              </div>
+            </div>
             <div className="codex-visibility-repair-field">
               <span>
                 {t("codex.sessionManager.repairModal.targetInstance", "目标实例")}

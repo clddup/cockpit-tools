@@ -13,7 +13,8 @@ const REMOTE_CONFIG_CACHE_FILE: &str = "remote_config_cache.json";
 const REMOTE_CONFIG_LOCAL_OVERRIDE_FILE: &str = "remote-config.local.json";
 const CACHE_TTL_MS: i64 = 3_600_000;
 const DEFAULT_REFRESH_INTERVAL_MS: i64 = 3_600_000;
-const BUILTIN_HIDDEN_PLATFORM_IDS: &[&str] = &["claude", "claude_cli"];
+const BUILTIN_HIDDEN_PLATFORM_IDS: &[&str] = &[];
+const NEVER_REMOTE_HIDE_PLATFORM_IDS: &[&str] = &["claude_manager"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -323,8 +324,7 @@ fn normalize_platform_id(value: &str) -> Option<String> {
         "antigravity" => Some("antigravity".to_string()),
         "antigravity-ide" => Some("antigravity_ide".to_string()),
         "codex" => Some("codex".to_string()),
-        "claude" | "claude-desktop" => Some("claude".to_string()),
-        "claude-cli" | "claude-code" => Some("claude_cli".to_string()),
+        "claude-manager" => Some("claude_manager".to_string()),
         "zed" => Some("zed".to_string()),
         "github-copilot" | "githubcopilot" => Some("github-copilot".to_string()),
         "windsurf" => Some("windsurf".to_string()),
@@ -431,6 +431,15 @@ fn build_state(payload: RemoteConfigPayload, updated_at: i64) -> RemoteConfigSta
             });
         }
     }
+
+    for platform_id in NEVER_REMOTE_HIDE_PLATFORM_IDS {
+        hidden.remove(*platform_id);
+    }
+    applied_rules.iter_mut().for_each(|rule| {
+        rule.platform_ids
+            .retain(|platform_id| !NEVER_REMOTE_HIDE_PLATFORM_IDS.contains(&platform_id.as_str()));
+    });
+    applied_rules.retain(|rule| !rule.platform_ids.is_empty());
 
     let refresh_interval_ms = payload
         .refresh_interval_ms

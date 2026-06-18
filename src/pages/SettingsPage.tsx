@@ -220,19 +220,18 @@ const FALLBACK_PLATFORM_SETTINGS_ORDER: Record<PlatformId, number> = {
   antigravity: 0,
   antigravity_ide: 1,
   codex: 2,
-  claude: 3,
-  claude_cli: 4,
-  'github-copilot': 5,
-  windsurf: 6,
-  kiro: 7,
-  cursor: 8,
-  gemini: 9,
-  codebuddy: 10,
-  codebuddy_cn: 11,
-  qoder: 12,
-  trae: 13,
-  workbuddy: 14,
-  zed: 15,
+  claude_manager: 3,
+  'github-copilot': 4,
+  windsurf: 5,
+  kiro: 6,
+  cursor: 7,
+  gemini: 8,
+  codebuddy: 9,
+  codebuddy_cn: 10,
+  qoder: 11,
+  trae: 12,
+  workbuddy: 13,
+  zed: 14,
 };
 type UpdateCheckSource = 'auto' | 'manual';
 type UpdateCheckFinishedDetail = {
@@ -3499,19 +3498,19 @@ export function SettingsPage() {
 
               </div>
 
-              <div style={{ order: platformSettingsOrder.claude }}>
+              <div style={{ order: platformSettingsOrder.claude_manager }}>
                 <div className="group-title">
-                  {t('settings.general.claudeSettingsTitle', 'Claude Desktop 设置')}
+                  {t('settings.general.claudeSettingsTitle', 'Claude 设置')}
                 </div>
                 <div className="settings-group">
                   {renderPlatformAutoRefreshRow({
                     title: t(
                       'settings.general.claudeAutoRefresh',
-                      'Claude Desktop 自动刷新配额',
+                      'Claude 自动刷新配额',
                     ),
                     description: t(
                       'settings.general.claudeAutoRefreshDesc',
-                      '后台自动更新 Claude Desktop 账号配额缓存',
+                      '后台自动更新 Claude 账号配额缓存',
                     ),
                     value: claudeAutoRefresh,
                     setValue: setClaudeAutoRefresh,
@@ -5978,7 +5977,7 @@ export function SettingsPage() {
         </div>
       </div>
       {releaseHistoryOpen && (
-        <div className="modal-overlay" onClick={handleCloseReleaseHistory}>
+        <div className="modal-overlay">
           <div className="modal settings-release-history-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h2>{t('settings.about.releaseHistoryTitle', '更新记录')}</h2>

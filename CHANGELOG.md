@@ -7,17 +7,26 @@ All notable changes to Cockpit Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
+## [0.26.0] - 2026-06-18
+
+### Added
+- **Claude platform management is now available**: Cockpit can manage Claude and Claude CLI accounts in one workspace and show them as one Claude platform across navigation, dashboard, layout, and floating cards. It supports Claude sign-in, Claude Code OAuth/API Key accounts, Claude Gateway provider setup, quota and identity cards, APIKEY.FUN prefill, and separate Claude/CLI instance launch flows.
+- **Antigravity now distinguishes Desktop and IDE instance management**: Antigravity and Antigravity IDE use separate launch/runtime targets, icons, instance stores, and PID detection so each client can be managed independently.
+
+### Changed
+- **Codex session visibility repair keeps switching lightweight**: account/API switches no longer run heavyweight repairs inline, while the manual repair dialog keeps selectable repair depth, progress feedback, and session-level targeting.
+- **Account import/export and modal flows are more consistent**: export dialogs, group pickers, destructive confirmations, and modal error handling use the shared preview/confirmation patterns more consistently across platforms.
+
+---
 ## [0.25.7] - 2026-06-15
 
 ### Added
 - **APIKEY.FUN now has a fuller key workspace**: saved keys can retain the last queried balance, automatically reload the first saved key when the page opens, show usage details, read the current key's available model list, and prefill Codex provider setup without directly creating the target account.
 - **Codex session management now supports targeted session copy and recovery workflows**: selected sessions can be copied to a target instance, moved to the trash, restored later, selected across all projects, and inspected with copied session IDs while target instance choices follow the same order as the instance list.
-- **Codex account export now supports preview-first workflows**: exports can be previewed, copied, and downloaded, including multi-document formats such as sub2api and cpa.
-- **Remote platform visibility can now hide unfinished entries safely**: remote configuration can remove platform entries from navigation, dashboards, platform switchers, and floating cards while preserving local accounts, login state, and backend data.
 
 ### Changed
 - **Gemini quota display now uses quota-summary buckets**: Gemini quota refresh reads `retrieveUserQuotaSummary` so account pages, dashboard cards, tray items, and native menus can show Gemini and third-party 5-hour and weekly quota windows more consistently. Thanks @xdd666t.
-- **Codex session visibility repair now uses a single official state DB path**: automatic and manual repair both update only the `state_5.sqlite` session records used by the official sidebar, without scanning or rewriting rollouts, `session_index.jsonl`, or triggering an official app-server rebuild.
+- **Codex session visibility repair now separates light and deep paths**: post-switch automatic repair only updates the `state_5.sqlite` session records used by the official sidebar, while manual Repair Visibility can choose deep repair to scan rollouts, `session_index.jsonl`, and SQLite indexes before rebuilding the official sidebar state.
 - **Codex fast service tier now maps to `priority` more reliably**: fast-tier requests preserve the intended priority behavior through local access, instance launch, Responses payload conversion, and sidecar manifests. Thanks @lcpdeb.
 - **Model-provider usage querying is shared across Codex and APIKEY.FUN**: provider balance and usage checks now use a common service path, keep cached usage visible while refreshing, and classify unsupported usage endpoints consistently.
 

@@ -92,6 +92,7 @@ interface InstancesManagerProps<TAccount extends AccountLike> {
   getAccountSearchText?: (account: TAccount) => string;
   appType?:
     | "antigravity"
+    | "antigravity_ide"
     | "codex"
     | "claude"
     | "vscode"
@@ -283,6 +284,8 @@ const resolveFloatingCardPlatformId = (
   switch (appType) {
     case "vscode":
       return "github-copilot";
+    case "claude":
+      return "claude_manager";
     default:
       return appType;
   }
@@ -978,9 +981,13 @@ export function InstancesManager<TAccount extends AccountLike>({
       rawApp === "qoder"
         ? rawApp
         : appType;
+    const runtimeTarget =
+      appType === "antigravity" || appType === "antigravity_ide"
+        ? appType
+        : undefined;
     const retry = instanceId
-      ? { kind: "instance" as const, instanceId }
-      : { kind: "default" as const };
+      ? { kind: "instance" as const, instanceId, runtimeTarget }
+      : { kind: "default" as const, runtimeTarget };
     window.dispatchEvent(
       new CustomEvent("app-path-missing", { detail: { app, retry } }),
     );
@@ -2744,7 +2751,6 @@ export function InstancesManager<TAccount extends AccountLike>({
       {initGuideInstance && (
         <div
           className="modal-overlay"
-          onClick={() => setInitGuideInstance(null)}
         >
           <div
             className="modal instance-init-guide-modal"
@@ -2810,7 +2816,6 @@ export function InstancesManager<TAccount extends AccountLike>({
       {deleteConfirmInstance && (
         <div
           className="modal-overlay"
-          onClick={() => setDeleteConfirmInstance(null)}
         >
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
@@ -2856,7 +2861,6 @@ export function InstancesManager<TAccount extends AccountLike>({
       {runningNoticeInstance && (
         <div
           className="modal-overlay"
-          onClick={() => setRunningNoticeInstance(null)}
         >
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
@@ -2903,7 +2907,7 @@ export function InstancesManager<TAccount extends AccountLike>({
       )}
 
       {showModal && (
-        <div className="modal-overlay" onClick={closeModal}>
+        <div className="modal-overlay">
           <div
             className="modal modal-lg instance-editor-modal"
             onClick={(e) => e.stopPropagation()}

@@ -1076,7 +1076,7 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
         case 'codex':
           return 'Codex';
         case 'claude':
-          return 'Claude Desktop';
+          return 'Claude';
         case 'github_copilot':
           return 'GitHub Copilot';
         case 'windsurf':
@@ -1770,7 +1770,7 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
   };
 
   const overlayContent = isOpen ? (
-    <div className="qs-overlay" onClick={(e) => { if (e.target === e.currentTarget) setIsOpen(false); }}>
+    <div className="qs-overlay">
       <div className="qs-modal" ref={modalRef}>
         <div className="qs-header">
           <span className="qs-title">{getTitle()}</span>

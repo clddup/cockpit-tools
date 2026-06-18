@@ -13,8 +13,21 @@ import * as qoderService from './qoderService';
 import * as traeService from './traeService';
 import * as workbuddyService from './workbuddyService';
 import * as zedService from './zedService';
+import type { ClaudeAccount } from '../types/claude';
 
 type AccountWithId = { id: string };
+
+async function listClaudeManagerTransferAccounts(): Promise<AccountWithId[]> {
+  const accounts = await claudeService.listClaudeAccounts();
+  const seen = new Set<string>();
+  return accounts.filter((account: ClaudeAccount) => {
+    if (!account.id || seen.has(account.id)) {
+      return false;
+    }
+    seen.add(account.id);
+    return true;
+  });
+}
 
 interface TransferAdapter {
   listAccounts: () => Promise<AccountWithId[]>;
@@ -38,13 +51,8 @@ const PLATFORM_ADAPTERS: Record<PlatformId, TransferAdapter> = {
     exportAccounts: codexService.exportCodexAccounts,
     importFromJson: codexService.importCodexFromJson,
   },
-  claude: {
-    listAccounts: claudeService.listClaudeAccounts,
-    exportAccounts: claudeService.exportClaudeAccounts,
-    importFromJson: claudeService.importClaudeFromJson,
-  },
-  claude_cli: {
-    listAccounts: claudeService.listClaudeAccounts,
+  claude_manager: {
+    listAccounts: listClaudeManagerTransferAccounts,
     exportAccounts: claudeService.exportClaudeAccounts,
     importFromJson: claudeService.importClaudeFromJson,
   },

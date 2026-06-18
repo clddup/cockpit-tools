@@ -7,17 +7,26 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ---
+## [0.26.0] - 2026-06-18
+
+### 新增
+- **新增 Claude 平台管理**：Cockpit 现在可以在同一个 Claude 工作区管理 Claude 与 Claude CLI 账号，并在导航、仪表盘、平台布局和悬浮卡片中统一显示为一个 Claude 平台；支持 Claude 登录、Claude Code OAuth/API Key 账号、Claude Gateway 供应商配置、账号身份与额度卡片、APIKEY.FUN 预填，以及 Claude/CLI 各自独立的实例启动流程。
+- **Antigravity 现在区分 Desktop 与 IDE 实例管理**：Antigravity 与 Antigravity IDE 使用独立的启动目标、图标、实例存储和 PID 识别，可分别管理两个官方客户端。
+
+### 变更
+- **Codex 会话可见性修复保持切号轻量**：账号/API 切换不再内联执行重型修复；手动修复弹框保留修复深度选择、进度反馈和会话级目标选择。
+- **账号导入导出与弹框流程更统一**：导出弹框、分组选择、危险操作确认和弹框内错误处理在各平台间更一致地使用预览与确认流程。
+
+---
 ## [0.25.7] - 2026-06-15
 
 ### 新增
 - **APIKEY.FUN 现在提供更完整的密钥工作区**：保存的密钥会保留最近一次查询的余额，进入页面时会自动载入第一个已保存密钥，展示用量详情，读取当前密钥可用模型列表，并可预填到 Codex 供应商设置中，但不会直接替用户创建目标账号。
 - **Codex 会话管理支持定向复制和恢复流程**：可将选中会话复制到指定实例、移入废纸篓、后续恢复、跨项目全选会话，并可复制会话 ID；目标实例选择顺序也与实例列表保持一致。
-- **Codex 账号导出支持先预览的流程**：导出内容可先预览、复制和下载，并支持 sub2api、cpa 等多文档格式。
-- **远端平台可见性现在可以安全隐藏未完成入口**：远端配置可从导航、总览、平台切换器和悬浮卡片中隐藏平台入口，同时保留本地账号、登录态和后端数据。
 
 ### 变更
 - **Gemini 额度展示改用 quota summary 分桶**：Gemini 额度刷新会读取 `retrieveUserQuotaSummary`，账号页、首页卡片、托盘和原生菜单可更稳定展示 Gemini 与第三方模型的 5 小时、周额度窗口。感谢 @xdd666t。
-- **Codex 会话可见性修复收敛为单一官方 state DB 路径**：自动和手动修复都只校正官方侧边栏依赖的 `state_5.sqlite` 会话记录，不再扫描或改写 rollout、`session_index.jsonl`，也不触发官方 app-server 重建。
+- **Codex 会话可见性修复区分轻量与深度路径**：切号后的自动修复只校正官方侧边栏依赖的 `state_5.sqlite` 会话记录；手动“修复可见性”可选择深度修复，用于扫描 rollout、`session_index.jsonl` 与 SQLite 索引并重建官方侧边栏状态。
 - **Codex fast service tier 更可靠地映射到 `priority`**：快速档位请求在本地访问、实例启动、Responses payload 转换和 sidecar manifest 链路中会保留预期的 priority 行为。感谢 @lcpdeb。
 - **模型供应商用量查询改为 Codex 与 APIKEY.FUN 共用能力**：供应商余额和用量检测现在走统一服务路径，刷新时保留缓存用量，并一致识别不支持的 usage 接口。
 

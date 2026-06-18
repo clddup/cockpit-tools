@@ -16,7 +16,7 @@ import {
   getClaudePlanBadge,
   getClaudePlanBadgeClass,
   getClaudeQuotaClass,
-  isClaudeDesktopOAuthAccount,
+  isClaudeDesktopRuntimeAccount,
 } from '../types/claude';
 import type { InstanceLaunchMode, InstanceProfile } from '../types/instance';
 
@@ -108,7 +108,7 @@ export function ClaudeInstancesContent({
     account: ClaudeAccount,
     launchMode: InstanceLaunchMode,
   ) => {
-    const isDesktop = isClaudeDesktopOAuthAccount(account);
+    const isDesktop = isClaudeDesktopRuntimeAccount(account);
     return launchMode === 'cli' ? !isDesktop : isDesktop;
   };
 
@@ -221,18 +221,18 @@ export function ClaudeInstancesContent({
         unsupportedTitleKey="common.shared.instances.unsupported.title"
         unsupportedTitleDefault="暂不支持当前系统"
         unsupportedDescKey="claude.instances.unsupportedDescPlatform"
-        unsupportedDescDefault="Claude Desktop / Claude CLI 多开实例仅支持 macOS、Windows 和 Linux。"
+        unsupportedDescDefault="Claude / Claude CLI 多开实例仅支持 macOS、Windows 和 Linux。"
         onInstanceStarted={handleInstanceStarted}
         resolveStartSuccessMessage={(instance) =>
           (instance.launchMode ?? 'app') === 'cli'
             ? t('claude.cli.prepared', 'Claude CLI 已准备')
-            : t('claude.instances.startSuccess', 'Claude Desktop 已启动')
+            : t('claude.instances.startSuccess', 'Claude 已启动')
         }
         isAccountAllowedForLaunchMode={isAccountAllowedForLaunchMode}
       />
 
       {launchModal && (
-        <div className="modal-overlay" onClick={() => setLaunchModal(null)}>
+        <div className="modal-overlay">
           <div className="modal modal-lg" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <button

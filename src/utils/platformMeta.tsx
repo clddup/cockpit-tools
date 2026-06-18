@@ -2,7 +2,8 @@ import { ReactNode } from 'react';
 import { Github } from 'lucide-react';
 import { TFunction } from 'i18next';
 import { PlatformId } from '../types/platform';
-import { RobotIcon } from '../components/icons/RobotIcon';
+import { AntigravityIcon } from '../components/icons/AntigravityIcon';
+import { AntigravityIdeIcon } from '../components/icons/AntigravityIdeIcon';
 import { CodexIcon } from '../components/icons/CodexIcon';
 import { ClaudeIcon } from '../components/icons/ClaudeIcon';
 import { WindsurfIcon } from '../components/icons/WindsurfIcon';
@@ -23,10 +24,8 @@ export function getPlatformLabel(platformId: PlatformId, _t: TFunction): string 
       return 'Antigravity IDE';
     case 'codex':
       return 'Codex';
-    case 'claude':
-      return 'Claude Desktop';
-    case 'claude_cli':
-      return 'Claude CLI';
+    case 'claude_manager':
+      return 'Claude';
     case 'zed':
       return 'Zed';
     case 'github-copilot':
@@ -57,12 +56,12 @@ export function getPlatformLabel(platformId: PlatformId, _t: TFunction): string 
 export function renderPlatformIcon(platformId: PlatformId, size = 20): ReactNode {
   switch (platformId) {
     case 'antigravity':
+      return <AntigravityIcon style={{ width: size, height: size }} />;
     case 'antigravity_ide':
-      return <RobotIcon style={{ width: size, height: size }} />;
+      return <AntigravityIdeIcon style={{ width: size, height: size }} />;
     case 'codex':
       return <CodexIcon size={size} />;
-    case 'claude':
-    case 'claude_cli':
+    case 'claude_manager':
       return <ClaudeIcon size={size} />;
     case 'zed':
       return <ZedIcon size={size} />;
