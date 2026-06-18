@@ -4,6 +4,8 @@ description: 同步上游：读取 LOCAL_CHANGES.md，确认 main 可跟上游�
 disable-model-invocation: true
 allowed-tools:
   - Read(.claude/LOCAL_CHANGES.md)
+  - Read(CHANGELOG.md)
+  - Read(CHANGELOG.zh-CN.md)
   - Bash(git status *)
   - Bash(git remote *)
   - Bash(git config *)
@@ -14,6 +16,9 @@ allowed-tools:
   - Bash(git merge-base *)
   - Bash(git diff *)
   - Bash(git log *)
+  - Bash(git show *)
+  - Bash(git tag *)
+  - Bash(git for-each-ref *)
   - Bash(git merge *)
 ---
 
@@ -115,6 +120,14 @@ allowed-tools:
 
     记为 `PRE_MERGE_HEAD`。
 
+    同时记录当前分支已经合入的最新上游 release tag，作为本次功能摘要的起点：
+
+    ```bash
+    git tag --merged PRE_MERGE_HEAD --sort='-v:refname'
+    ```
+
+    从输出中选择最新的上游原始 release tag，忽略包含 `clddup` 的 tag，记为 `PREVIOUS_UPSTREAM_TAG`。如果本次跨过多个上游 release，后续功能摘要必须覆盖 `PREVIOUS_UPSTREAM_TAG..LATEST_UPSTREAM_TAG` 的全部 release；如果只跨一个 release，也必须说明该 release 的主要新增、变更和修复。
+
 12. 合并最新 release tag 对应的 commit（不是 tag 对象本身），并使用固定自定义 merge message，避免出现默认的 `Merge commit '...' into develop/clddup` 信息：
 
     ```bash
@@ -136,6 +149,23 @@ allowed-tools:
     git diff --name-only PRE_MERGE_HEAD..HEAD
     git diff --stat PRE_MERGE_HEAD..HEAD
     ```
+
+    同时提取并总结“本次合并了上游哪些功能”。这是每次同步后的必报内容，不能省略。摘要应优先依据上游 release changelog，再用 commit log 和 diff 验证：
+
+    ```bash
+    git log --oneline --no-merges PREVIOUS_UPSTREAM_TAG..LATEST_UPSTREAM_TAG
+    git diff --stat PREVIOUS_UPSTREAM_TAG..LATEST_UPSTREAM_TAG
+    git show LATEST_UPSTREAM_TAG_COMMIT:CHANGELOG.zh-CN.md
+    git show LATEST_UPSTREAM_TAG_COMMIT:CHANGELOG.md
+    ```
+
+    功能摘要要求：
+
+    - 明确写出比较范围，例如 `v0.25.7..v0.26.0`。
+    - 按“新增 / 变更 / 修复或风险点”归纳，而不是只列 commit hash。
+    - 只保留对用户有意义的产品功能、行为变化、平台支持、依赖/版本变化；不要把纯 release、cask、版本号提交当成功能。
+    - 如果 changelog 与 commit/diff 不一致，以实际 diff 和当前代码为准，并说明是从 diff 推断。
+    - 如果触碰本分支自定义行为区域，要说明上游功能与本地定制是否存在交叉影响。
 
 14. 将上一步文件列表与 `.claude/LOCAL_CHANGES.md` 的 `Watched files` 做交集，明确报告：
 
@@ -178,6 +208,7 @@ allowed-tools:
     - `upstream/main` 是否 fetch 成功
     - 最新上游 release tag 是哪个
     - `develop/clddup` 合并到哪个 tag commit
+    - 本次合并了上游哪些功能：必须包含比较范围、主要新增、主要变更、重要修复/风险点
     - 是否出现冲突
     - 是否触碰 `.claude/LOCAL_CHANGES.md` 中的 watched files
     - watched files 交集非空时，重点检查结论是什么，哪些文件仍需人工复核
