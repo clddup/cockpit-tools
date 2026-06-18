@@ -77,7 +77,8 @@ Watched files:
 Behavior to preserve:
 
 - Backend emits `codex:json-import-progress` events during JSON/token import. Because the prepare stage is concurrent (`Semaphore(5)`), progress must be emitted from INSIDE each concurrent task (via an `AtomicUsize` counter), NOT after `join_all` completes — otherwise the progress bar jumps straight to 100%.
-- After import, `refresh_imported_codex_accounts` (in `commands/codex.rs`) emits `codex:json-import-progress` with `"phase": "refresh"` for each OAuth account whose quota is refreshed (api_key accounts are excluded from the count).
+- After import, `refresh_imported_codex_accounts` (in `commands/codex.rs`) refreshes OAuth account quotas with 5-way bounded concurrency (`MAX_IMPORT_REFRESH_CONCURRENT = 5`) and preserves original account order via result slots. Do NOT let it revert to a serial for-loop; this was previously lost during upstream alignment.
+- The refresh phase emits `codex:json-import-progress` with `"phase": "refresh"` after each account refresh completes, so `(current/total)` represents completed refreshes. api_key accounts are excluded from the count.
 - Frontend `handleTokenImport` listens to `codex:json-import-progress` and shows `(current/total)` in the import message; on `phase === "refresh"` it shows the "刷新配额" label. The listener is cleaned up in a `finally` block.
 - Store `hydrateAccountProfilesIfNeeded` (in `useCodexAccountStore.ts`) refreshes account profiles with 5-way concurrency (worker-pool `runNext` pattern) and buffers updates, flushing to the UI every 500ms plus a final flush after all complete. This reduces re-renders while keeping the list visibly updating. Do NOT let it revert to a serial for-loop with per-account `set()`.
 
