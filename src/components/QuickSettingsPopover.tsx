@@ -79,6 +79,7 @@ interface GeneralConfig {
   antigravity_app_path: string;
   codex_app_path: string;
   claude_app_path: string;
+  claude_app_scan_roots: string;
   codex_specified_app_path: string;
   vscode_app_path: string;
   windsurf_app_path: string;
@@ -196,6 +197,14 @@ type CodexWindowThresholdKey =
   | 'codex_auto_switch_secondary_threshold'
   | 'codex_quota_alert_primary_threshold'
   | 'codex_quota_alert_secondary_threshold';
+
+type ClaudeDesktopLaunchCandidate = {
+  target_type: string;
+  label: string;
+  target: string;
+  source: string;
+  supports_multi_instance: boolean;
+};
 
 interface QuickSettingsPopoverProps {
   type: QuickSettingsType;
@@ -318,6 +327,7 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
   const [config, setConfig] = useState<GeneralConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [pathDetecting, setPathDetecting] = useState(false);
+  const [claudeLaunchCandidates, setClaudeLaunchCandidates] = useState<ClaudeDesktopLaunchCandidate[]>([]);
   const [openingCodexConfig, setOpeningCodexConfig] = useState(false);
   const [codexQuickConfig, setCodexQuickConfig] = useState<CodexQuickConfig | null>(null);
   const [codexQuickConfigPresetId, setCodexQuickConfigPresetId] =
@@ -778,6 +788,7 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
       setCodexAutoSwitchSecondaryCustomThreshold(String(cfg.codex_auto_switch_secondary_threshold));
       setCodexQuotaAlertPrimaryCustomThreshold(String(cfg.codex_quota_alert_primary_threshold));
       setCodexQuotaAlertSecondaryCustomThreshold(String(cfg.codex_quota_alert_secondary_threshold));
+      setClaudeLaunchCandidates([]);
     } catch (err) {
       console.error('Failed to load config:', err);
       setError(t('quickSettings.error.loadFailed', {
@@ -842,6 +853,8 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
           opencodeAppPath: merged.opencode_app_path,
           antigravityAppPath: merged.antigravity_app_path,
           codexAppPath: merged.codex_app_path,
+          claudeAppPath: merged.claude_app_path,
+          claudeAppScanRoots: merged.claude_app_scan_roots,
           codexSpecifiedAppPath: merged.codex_specified_app_path,
           vscodeAppPath: merged.vscode_app_path,
           windsurfAppPath: merged.windsurf_app_path,
@@ -979,6 +992,28 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
     }
   };
 
+  const handlePickClaudeScanRoot = async () => {
+    try {
+      const selected = await open({ multiple: false, directory: true });
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (!path || !config) return;
+      setClaudeLaunchCandidates([]);
+      saveConfig({ claude_app_scan_roots: path });
+    } catch (err) {
+      console.error('Failed to pick Claude scan root:', err);
+      setError(t('quickSettings.error.pickPathFailed', {
+        error: String(err),
+        defaultValue: '选择路径失败：{{error}}',
+      }));
+    }
+  };
+
+  const handleClearClaudeScanRoot = () => {
+    if (!config || pathDetecting) return;
+    setClaudeLaunchCandidates([]);
+    saveConfig({ claude_app_scan_roots: '' });
+  };
+
   const handleResetAppPath = async (
     target:
       | 'antigravity'
@@ -996,6 +1031,36 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
       | 'zed',
   ) => {
     if (pathDetecting) return;
+    if (target === 'claude') {
+      setPathDetecting(true);
+      setError(null);
+      try {
+        const candidates = await invoke<ClaudeDesktopLaunchCandidate[]>(
+          'scan_claude_desktop_launch_targets',
+          {
+            scanRoots: config?.claude_app_scan_roots?.trim() || null,
+          },
+        );
+        setClaudeLaunchCandidates(candidates);
+        if (candidates.length === 0) {
+          setError(
+            t(
+              'quickSettings.claude.scanEmpty',
+              '未扫描到 Claude Desktop，请手动选择 Claude.exe 或调整扫描范围。',
+            ),
+          );
+        }
+      } catch (err) {
+        console.error('Failed to scan Claude launch targets:', err);
+        setError(t('quickSettings.error.resetPathFailed', {
+          error: String(err),
+          defaultValue: '重置路径失败：{{error}}',
+        }));
+      } finally {
+        setPathDetecting(false);
+      }
+      return;
+    }
     setPathDetecting(true);
     try {
       const detected = await invoke<string | null>('detect_app_path', { app: target, force: true });
@@ -1005,8 +1070,6 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
           ? 'antigravity_app_path'
           : target === 'codex'
             ? 'codex_app_path'
-            : target === 'claude'
-              ? 'claude_app_path'
             : target === 'vscode'
               ? 'vscode_app_path'
               : target === 'windsurf'
@@ -1036,6 +1099,11 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
     } finally {
       setPathDetecting(false);
     }
+  };
+
+  const handleSelectClaudeLaunchCandidate = (candidate: ClaudeDesktopLaunchCandidate) => {
+    setError(null);
+    saveConfig({ claude_app_path: candidate.target });
   };
 
   const handlePickCodexSpecifiedAppPath = async () => {
@@ -2048,12 +2116,53 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
                   <FolderOpen size={15} />
                   <span>{getAppPathLabel()}</span>
                 </div>
+                {type === 'claude' && config && (
+                  <div className="qs-claude-scan-roots">
+                    <label>{t('appPath.missing.scanRoots', '扫描范围')}</label>
+                    <div className="qs-claude-scan-root-row">
+                      <input
+                        type="text"
+                        className="qs-path-input qs-claude-scan-roots-input"
+                        value={config.claude_app_scan_roots}
+                        placeholder={t(
+                          'appPath.missing.scanRootsPlaceholder',
+                          '可选，选择一个目录或盘符；留空时按盘符扫描 WindowsApps 并补充开始菜单应用。',
+                        )}
+                        readOnly
+                        disabled={pathDetecting}
+                      />
+                      <div className="qs-path-actions">
+                        <button
+                          className="qs-btn"
+                          onClick={handlePickClaudeScanRoot}
+                          disabled={pathDetecting}
+                        >
+                          {t('settings.general.codexPathSelect', '选择')}
+                        </button>
+                        <button
+                          className="qs-btn"
+                          onClick={handleClearClaudeScanRoot}
+                          disabled={pathDetecting || !config.claude_app_scan_roots.trim()}
+                        >
+                          {t('common.clear', '清除')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="qs-path-control">
                   <input
                     type="text"
                     className="qs-path-input"
                     value={getAppPath()}
-                    placeholder={t('settings.general.codexAppPathPlaceholder', '默认路径')}
+                    placeholder={
+                      type === 'claude'
+                        ? t(
+                            'quickSettings.claude.appTargetPlaceholder',
+                            'Claude.exe 路径或 shell:AppsFolder\\...',
+                          )
+                        : t('settings.general.codexAppPathPlaceholder', '默认路径')
+                    }
                     onChange={(e) => {
                       const key =
                         type === 'antigravity'
@@ -2100,13 +2209,58 @@ export function QuickSettingsPopover({ type }: QuickSettingsPopoverProps) {
                       title={
                         pathDetecting
                           ? t('common.loading', '加载中...')
-                          : t('settings.general.codexPathReset', '恢复默认')
+                          : type === 'claude'
+                            ? t('appPath.missing.scanApps', '扫描应用')
+                            : t('settings.general.codexPathReset', '恢复默认')
                       }
                     >
-                      <RefreshCw size={12} className={pathDetecting ? 'spin' : undefined} />
+                      {type === 'claude' ? (
+                        pathDetecting
+                          ? t('common.loading', '加载中...')
+                          : t('appPath.missing.scanApps', '扫描应用')
+                      ) : (
+                        <RefreshCw size={12} className={pathDetecting ? 'spin' : undefined} />
+                      )}
                     </button>
                   </div>
                 </div>
+
+                {type === 'claude' && config && (
+                  <>
+                    {claudeLaunchCandidates.length > 0 && (
+                      <div className="qs-claude-candidate-list">
+                        {claudeLaunchCandidates.map((candidate) => (
+                          <button
+                            key={`${candidate.target_type}:${candidate.target}`}
+                            type="button"
+                            className={`qs-claude-candidate-item${
+                              config.claude_app_path.trim() === candidate.target ? ' selected' : ''
+                            }`}
+                            onClick={() => handleSelectClaudeLaunchCandidate(candidate)}
+                          >
+                            <div className="qs-claude-candidate-main">
+                              <span>{candidate.label || 'Claude Desktop'}</span>
+                              <span className="qs-claude-candidate-badge">
+                                {candidate.target_type === 'windows_app'
+                                  ? t('appPath.missing.windowsApp', 'Microsoft Store')
+                                  : 'EXE'}
+                              </span>
+                            </div>
+                            <div className="qs-claude-candidate-target">{candidate.target}</div>
+                            {!candidate.supports_multi_instance ? (
+                              <div className="qs-claude-candidate-note">
+                                {t(
+                                  'appPath.missing.defaultOnly',
+                                  '仅适用于默认桌面端；多开实例请选择真实 Claude.exe',
+                                )}
+                              </div>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {type === 'codex' && (
                   <>

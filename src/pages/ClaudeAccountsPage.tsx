@@ -129,7 +129,6 @@ const CLAUDE_CLI_LAST_WORKING_DIR_KEY = 'agtools.claude.cli.last_working_dir';
 const CLAUDE_API_KEY_USAGE_REFRESH_THROTTLE_MS = 10 * 1000;
 const CLAUDE_DESKTOP_LOGIN_PROGRESS_EVENT = 'claude:desktop-login-progress';
 const claudeApiKeyUsageInFlight = new Set<string>();
-const claudeApiKeyUsageAutoRefreshAt: Record<string, number> = {};
 const claudeApiKeyUsageManualRefreshAt: Record<string, number> = {};
 
 function isClaudeCloudflareError(message?: string | null): boolean {
@@ -844,12 +843,9 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
     () => readClaudeApiKeyUsageCache(),
   );
   const apiKeyUsageInFlightRef = useRef<Set<string>>(claudeApiKeyUsageInFlight);
-  const apiKeyUsageAutoRefreshAtRef = useRef<Record<string, number>>(claudeApiKeyUsageAutoRefreshAt);
   const apiKeyUsageManualRefreshAtRef = useRef<Record<string, number>>(claudeApiKeyUsageManualRefreshAt);
   const desktopLoginProgressIdRef = useRef<string | null>(null);
   const desktopLoginProgressUnlistenRef = useRef<UnlistenFn | null>(null);
-  const providerApiKeyUsageAutoRefreshPendingRef = useRef(true);
-  const previousActiveSubPlatformRef = useRef<ClaudeSubPlatform>(activeSubPlatform);
   const oauthPrepareAttemptedRef = useRef(false);
   const [switching, setSwitching] = useState<string | null>(null);
   const [cliLaunchingAccountId, setCliLaunchingAccountId] = useState<string | null>(null);
@@ -1002,13 +998,6 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [activeSubPlatform]);
-
-  useEffect(() => {
-    if (previousActiveSubPlatformRef.current !== activeSubPlatform) {
-      providerApiKeyUsageAutoRefreshPendingRef.current = true;
-      previousActiveSubPlatformRef.current = activeSubPlatform;
-    }
   }, [activeSubPlatform]);
 
   const maskAccountText = useCallback(
@@ -1965,12 +1954,30 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
     try {
       await store.switchAccount(account.id);
       setCurrentAccountId(account.id);
+      const displayName = maskAccountText(getClaudeAccountDisplayEmail(account));
       setMessage({
-        text: t('messages.switched', {
-          email: maskAccountText(getClaudeAccountDisplayEmail(account)),
-        }),
+        text: isClaudeDesktopGatewayAccount(account)
+          ? t(
+            'claude.desktopGateway.switchSuccess',
+            '已应用 Claude Desktop 供应商配置：{{name}}。',
+            { name: displayName },
+          )
+          : t('messages.switched', {
+            email: displayName,
+          }),
       });
     } catch (error) {
+      if (String(error ?? '').startsWith('APP_PATH_NOT_FOUND:claude')) {
+        window.dispatchEvent(
+          new CustomEvent('app-path-missing', {
+            detail: {
+              app: 'claude',
+              retry: { kind: 'switchAccount', accountId: account.id },
+            },
+          }),
+        );
+        return;
+      }
       setMessage({
         text: t('messages.switchFailed', {
           error: String(error),
@@ -2226,12 +2233,11 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
   const refreshClaudeApiKeyUsage = useCallback(
     async (
       account: ClaudeAccount,
-      options?: { showMessage?: boolean; source?: 'auto' | 'manual' },
+      options?: { showMessage?: boolean },
     ) => {
       const apiKey = account.api_key?.trim() || '';
       const baseUrl = account.api_base_url?.trim() || '';
       const showMessage = options?.showMessage === true;
-      const source = options?.source ?? 'auto';
       if (!apiKey || !baseUrl) {
         if (showMessage) {
           setMessage({
@@ -2242,14 +2248,12 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
         return;
       }
       const requestKey = getClaudeApiKeyUsageRequestKey(account);
-      const throttleRef =
-        source === 'manual' ? apiKeyUsageManualRefreshAtRef : apiKeyUsageAutoRefreshAtRef;
       const now = Date.now();
-      const lastRequestedAt = throttleRef.current[requestKey] ?? 0;
+      const lastRequestedAt = apiKeyUsageManualRefreshAtRef.current[requestKey] ?? 0;
       if (now - lastRequestedAt < CLAUDE_API_KEY_USAGE_REFRESH_THROTTLE_MS) return;
       if (apiKeyUsageInFlightRef.current.has(requestKey)) return;
 
-      throttleRef.current[requestKey] = now;
+      apiKeyUsageManualRefreshAtRef.current[requestKey] = now;
       apiKeyUsageInFlightRef.current.add(requestKey);
       setApiKeyUsageMap((previous) =>
         setClaudeApiKeyUsageStateForAccount(previous, account, {
@@ -2305,26 +2309,13 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
     [t],
   );
 
-  useEffect(() => {
-    if (!providerApiKeyUsageAutoRefreshPendingRef.current) return;
-    const apiKeyAccounts = currentSubPlatformAccounts.filter(
-      (account) => isClaudeProviderApiKeyAccount(account),
-    );
-    if (apiKeyAccounts.length === 0) return;
-
-    providerApiKeyUsageAutoRefreshPendingRef.current = false;
-    apiKeyAccounts.forEach((account) => {
-      void refreshClaudeApiKeyUsage(account, { source: 'auto' });
-    });
-  }, [activeSubPlatform, currentSubPlatformAccounts, refreshClaudeApiKeyUsage]);
-
   const handleRefresh = async (accountId: string) => {
     const targetAccount = useClaudeAccountStore
       .getState()
       .accounts.find((account) => account.id === accountId);
     if (targetAccount && isClaudeProviderApiKeyAccount(targetAccount)) {
       setMessage(null);
-      await refreshClaudeApiKeyUsage(targetAccount, { showMessage: true, source: 'manual' });
+      await refreshClaudeApiKeyUsage(targetAccount, { showMessage: true });
       return;
     }
 
@@ -2363,7 +2354,7 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
     try {
       for (const account of currentSubPlatformAccounts) {
         if (isClaudeProviderApiKeyAccount(account)) {
-          await refreshClaudeApiKeyUsage(account, { source: 'manual' });
+          await refreshClaudeApiKeyUsage(account);
         } else {
           await store.refreshToken(account.id);
         }
@@ -2546,11 +2537,13 @@ export function ClaudeAccountsPage({ subPlatform = 'desktop' }: ClaudeAccountsPa
                   : t('claude.cli.quickLaunch', 'CLI 启动')
               : isApiKey
                 ? t('claude.apiKey.switchDisabled', 'API Key 账号不能写入本地登录态')
-                : isClaudeCodeOAuth
-                  ? t('claude.oauth.switchHint', '切换到本机 Claude Code')
-                : isDesktopRuntime
-                  ? t('claude.desktopOAuth.switchHint', '切换到官方 Claude')
-                  : t('common.shared.switchAccount', '切换账号')
+                : isDesktopGateway
+                  ? t('claude.desktopGateway.switchHint', '应用供应商配置并启动 Claude Desktop')
+                  : isClaudeCodeOAuth
+                    ? t('claude.oauth.switchHint', '切换到本机 Claude Code')
+                    : isDesktopRuntime
+                      ? t('claude.desktopOAuth.switchHint', '切换到官方 Claude')
+                      : t('common.shared.switchAccount', '切换账号')
           }
         >
           {(isCliSubPlatform ? cliLaunchingAccountId : switching) === account.id

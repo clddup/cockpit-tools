@@ -89,12 +89,15 @@ import {
   getCodexPlanFilterKey,
   getCodexSubscriptionPresentation,
   hasCodexAccountName,
+  formatCodexResetTime,
+  formatCodexResetTimeAbsolute,
   isCodexApiKeyAccount,
   isCodexChatCompletionsApiKeyAccount,
   isCodexNewApiAccount,
   isCodexTeamLikePlan,
   type CodexApiProviderMode,
   type CodexQuotaErrorInfo,
+  type CodexResetCredit,
 } from "../types/codex";
 import { filterCodexLocalAccessAccountIds } from "../utils/codexLocalAccessAccounts";
 import { isBlockingCodexQuotaError } from "../utils/codexQuotaError";
@@ -227,6 +230,10 @@ import {
 } from "../utils/codexLocalAccessRiskNotice";
 import { formatCodexSessionVisibilityRepairMessage } from "../utils/codexSessionVisibility";
 import md5 from "blueimp-md5";
+
+// Temporarily hide the experimental API Key + OAuth local gateway entry.
+// Flip this back to true after the compatibility path is debugged.
+const ENABLE_OAUTH_BINDING_LOCAL_GATEWAY_TOGGLE = false;
 
 const CODEX_TOKEN_SINGLE_EXAMPLE = `{
   "tokens": {
@@ -2178,6 +2185,147 @@ export function CodexAccountsPage() {
     return typeof value === "number" && Number.isFinite(value) ? value : null;
   }, []);
 
+  const isAvailableResetCredit = useCallback((credit: CodexResetCredit) => {
+    const normalizedStatus = (credit.status || credit.raw_status || "available")
+      .trim()
+      .toLowerCase();
+    if (
+      normalizedStatus === "redeemed" ||
+      normalizedStatus === "used" ||
+      normalizedStatus === "consumed" ||
+      normalizedStatus === "expired"
+    ) {
+      return false;
+    }
+    return !(
+      typeof credit.expires_at === "number" &&
+      Number.isFinite(credit.expires_at) &&
+      credit.expires_at <= Math.floor(Date.now() / 1000)
+    );
+  }, []);
+
+  const getResetCreditDetails = useCallback((account: CodexAccount) => {
+    return Array.isArray(account.quota?.reset_credits)
+      ? account.quota.reset_credits
+      : [];
+  }, []);
+
+  const getResetCreditNextExpiresAt = useCallback(
+    (account: CodexAccount) => {
+      const explicit = account.quota?.reset_credits_next_expires_at;
+      if (typeof explicit === "number" && Number.isFinite(explicit)) {
+        return explicit;
+      }
+
+      const next = getResetCreditDetails(account)
+        .filter(isAvailableResetCredit)
+        .map((credit) => credit.expires_at)
+        .filter(
+          (value): value is number =>
+            typeof value === "number" && Number.isFinite(value),
+        )
+        .sort((a, b) => a - b)[0];
+      return next ?? null;
+    },
+    [getResetCreditDetails, isAvailableResetCredit],
+  );
+
+  const formatResetCreditTime = useCallback(
+    (timestamp: number | null | undefined) => {
+      return timestamp
+        ? formatCodexResetTime(timestamp, t)
+        : t("codex.quota.resetCreditTimeUnknown", "时间未知");
+    },
+    [t],
+  );
+
+  const formatResetCreditAbsoluteTime = useCallback(
+    (timestamp: number | null | undefined) => {
+      return timestamp
+        ? formatCodexResetTimeAbsolute(timestamp)
+        : t("codex.quota.resetCreditTimeUnknown", "时间未知");
+    },
+    [t],
+  );
+
+  const getResetCreditStatusLabel = useCallback(
+    (credit: CodexResetCredit) => {
+      const normalizedStatus = (credit.status || credit.raw_status || "")
+        .trim()
+        .toLowerCase();
+      if (
+        normalizedStatus === "redeemed" ||
+        normalizedStatus === "used" ||
+        normalizedStatus === "consumed"
+      ) {
+        return t("codex.quota.resetCreditStatusRedeemed", "已使用");
+      }
+      if (normalizedStatus === "available") {
+        return isAvailableResetCredit(credit)
+          ? t("codex.quota.resetCreditStatusAvailable", "可用")
+          : t("codex.quota.resetCreditStatusExpired", "已过期");
+      }
+      if (normalizedStatus === "expired") {
+        return t("codex.quota.resetCreditStatusExpired", "已过期");
+      }
+      if (!isAvailableResetCredit(credit)) {
+        return t("codex.quota.resetCreditStatusExpired", "已过期");
+      }
+      return (
+        credit.raw_status ||
+        credit.status ||
+        t("codex.quota.resetCreditStatusUnknown", "未知")
+      );
+    },
+    [isAvailableResetCredit, t],
+  );
+
+  const getResetCreditStatusTone = useCallback(
+    (credit: CodexResetCredit) => {
+      const normalizedStatus = (credit.status || credit.raw_status || "")
+        .trim()
+        .toLowerCase();
+      if (normalizedStatus === "available" && isAvailableResetCredit(credit)) {
+        return "is-available";
+      }
+      if (
+        normalizedStatus === "redeemed" ||
+        normalizedStatus === "used" ||
+        normalizedStatus === "consumed"
+      ) {
+        return "is-redeemed";
+      }
+      if (normalizedStatus === "expired" || !isAvailableResetCredit(credit)) {
+        return "is-expired";
+      }
+      return "is-unknown";
+    },
+    [isAvailableResetCredit],
+  );
+
+  const buildResetCreditsTitle = useCallback(
+    (account: CodexAccount, availableCount: number) => {
+      if (availableCount <= 0) {
+        return t("codex.quota.resetCreditNoCredits", "没有可用的主动重置次数");
+      }
+
+      const nextExpiresAt = getResetCreditNextExpiresAt(account);
+      if (nextExpiresAt) {
+        return t("codex.quota.resetCreditsTitleWithExpiry", {
+          count: availableCount,
+          time: formatResetCreditTime(nextExpiresAt),
+          defaultValue:
+            "可用于重置当前 5 小时窗口的剩余次数：{{count}}，最近到期：{{time}}",
+        });
+      }
+
+      return t("codex.quota.resetCreditsTitle", {
+        count: availableCount,
+      });
+    },
+    [formatResetCreditTime, getResetCreditNextExpiresAt, t],
+  );
+
   const resetCreditConfirmAccount = useMemo(
     () =>
       resetCreditConfirmAccountId
@@ -2189,6 +2337,12 @@ export function CodexAccountsPage() {
 
   const resetCreditConfirmAvailableCount = resetCreditConfirmAccount
     ? getResetCreditsAvailable(resetCreditConfirmAccount)
+    : null;
+  const resetCreditConfirmCredits = resetCreditConfirmAccount
+    ? getResetCreditDetails(resetCreditConfirmAccount)
+    : [];
+  const resetCreditConfirmNextExpiresAt = resetCreditConfirmAccount
+    ? getResetCreditNextExpiresAt(resetCreditConfirmAccount)
     : null;
   const isResetCreditConfirmSubmitting = resetCreditConfirmAccount
     ? resettingResetCreditAccountId === resetCreditConfirmAccount.id
@@ -2523,6 +2677,10 @@ export function CodexAccountsPage() {
     useState("");
   const [oauthBindingSaving, setOauthBindingSaving] = useState(false);
   const [oauthBindingAutoSwitch, setOauthBindingAutoSwitch] = useState(false);
+  const [
+    oauthBindingUseLocalGateway,
+    setOauthBindingUseLocalGateway,
+  ] = useState(false);
   const [oauthBindingSearchQuery, setOauthBindingSearchQuery] = useState("");
   const [oauthBindingFilterTypes, setOauthBindingFilterTypes] = useState<
     string[]
@@ -2748,6 +2906,7 @@ export function CodexAccountsPage() {
       setOauthBindingAccountId(null);
       setOauthBindingSelectedAccountId("");
       setOauthBindingAutoSwitch(false);
+      setOauthBindingUseLocalGateway(false);
       setOauthBindingSearchQuery("");
       setOauthBindingFilterTypes([]);
       setOauthBindingTagFilter([]);
@@ -2758,6 +2917,7 @@ export function CodexAccountsPage() {
       setOauthBindingAccountId(null);
       setOauthBindingSelectedAccountId("");
       setOauthBindingAutoSwitch(false);
+      setOauthBindingUseLocalGateway(false);
       setOauthBindingSearchQuery("");
       setOauthBindingFilterTypes([]);
       setOauthBindingTagFilter([]);
@@ -3542,6 +3702,7 @@ export function CodexAccountsPage() {
     setOauthBindingAccountId(null);
     setOauthBindingSelectedAccountId("");
     setOauthBindingAutoSwitch(false);
+    setOauthBindingUseLocalGateway(false);
     setOauthBindingSearchQuery("");
     setOauthBindingFilterTypes([]);
     setOauthBindingTagFilter([]);
@@ -3552,6 +3713,33 @@ export function CodexAccountsPage() {
     if (oauthBindingSaving) return;
     resetOAuthBindingModal();
   }, [oauthBindingSaving, resetOAuthBindingModal]);
+
+  const handleOAuthBindingLocalGatewayToggle = useCallback(
+    async (checked: boolean) => {
+      if (!checked) {
+        setOauthBindingUseLocalGateway(false);
+        return;
+      }
+      const confirmed = await confirmDialog(
+        t(
+          "codex.api.oauthBinding.localGatewayConfirm.message",
+          "开启后，该 API Key 账号绑定 OAuth 时会通过本地网关兼容模式启动：普通文本请求会自动移除 image_generation，避免部分供应商报“Image generation is not enabled”；OAuth 账号信息仍会保留。是否继续？",
+        ),
+        {
+          title: t(
+            "codex.api.oauthBinding.localGatewayConfirm.title",
+            "启用本地网关兼容模式",
+          ),
+          okLabel: t("common.confirm", "确认"),
+          cancelLabel: t("common.cancel", "取消"),
+        },
+      );
+      if (confirmed) {
+        setOauthBindingUseLocalGateway(true);
+      }
+    },
+    [t],
+  );
 
   const openOAuthBindingModal = useCallback(
     (account: CodexAccount, options?: { autoSwitch?: boolean }) => {
@@ -3565,6 +3753,10 @@ export function CodexAccountsPage() {
           : "",
       );
       setOauthBindingAutoSwitch(options?.autoSwitch ?? false);
+      setOauthBindingUseLocalGateway(
+        ENABLE_OAUTH_BINDING_LOCAL_GATEWAY_TOGGLE &&
+          Boolean(account.bound_oauth_use_local_gateway),
+      );
       setOauthBindingSearchQuery("");
       setOauthBindingFilterTypes([]);
       setOauthBindingTagFilter([]);
@@ -3588,6 +3780,7 @@ export function CodexAccountsPage() {
           : "",
       );
       setOauthBindingAutoSwitch(options?.autoSwitch ?? false);
+      setOauthBindingUseLocalGateway(false);
       setOauthBindingSearchQuery("");
       setOauthBindingFilterTypes([]);
       setOauthBindingTagFilter([]);
@@ -3767,6 +3960,8 @@ export function CodexAccountsPage() {
         await updateApiKeyBoundOAuthAccount(
           oauthBindingAccount.id,
           selectedOAuthBindingAccount.id,
+          ENABLE_OAUTH_BINDING_LOCAL_GATEWAY_TOGGLE &&
+            oauthBindingUseLocalGateway,
         );
       }
       setMessage({
@@ -3794,6 +3989,7 @@ export function CodexAccountsPage() {
     oauthBindingAccount,
     oauthBindingAutoSwitch,
     oauthBindingTargetKind,
+    oauthBindingUseLocalGateway,
     isOAuthBindingEligibleAccount,
     selectedOAuthBindingAccount,
     setMessage,
@@ -3819,7 +4015,7 @@ export function CodexAccountsPage() {
           );
         setLocalAccessState(nextState);
       } else if (oauthBindingAccount) {
-        await updateApiKeyBoundOAuthAccount(oauthBindingAccount.id, null);
+        await updateApiKeyBoundOAuthAccount(oauthBindingAccount.id, null, false);
       }
       setMessage({
         text: t("codex.api.oauthBinding.clearSuccess", "OAuth 绑定已解除"),
@@ -7697,12 +7893,7 @@ export function CodexAccountsPage() {
 
     const isResetting = resettingResetCreditAccountId === account.id;
     const isDisabled = isResetting || availableCount <= 0;
-    const titleText =
-      availableCount <= 0
-        ? t("codex.quota.resetCreditNoCredits", "没有可用的主动重置次数")
-        : t("codex.quota.resetCreditsTitle", {
-            count: availableCount,
-          });
+    const titleText = buildResetCreditsTitle(account, availableCount);
 
     return (
       <div className="codex-reset-credit-row inline">
@@ -12321,12 +12512,42 @@ export function CodexAccountsPage() {
                       </div>
                     </div>
                     <div className="codex-oauth-binding-picker">
-                      <label>
-                        {t(
-                          "codex.api.oauthBinding.selectLabel",
-                          "选择 OAuth 账号",
+                      <div className="codex-oauth-binding-picker-header">
+                        <label>
+                          {t(
+                            "codex.api.oauthBinding.selectLabel",
+                            "选择 OAuth 账号",
+                          )}
+                        </label>
+                        {ENABLE_OAUTH_BINDING_LOCAL_GATEWAY_TOGGLE &&
+                          oauthBindingTargetKind === "api_key_account" && (
+                          <label
+                            className="codex-oauth-binding-gateway-toggle"
+                            title={t(
+                              "codex.api.oauthBinding.localGatewayTooltip",
+                              "开启后普通文本请求会通过本地网关移除 image_generation，用于兼容未开通图片生成的供应商。",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={oauthBindingUseLocalGateway}
+                              onChange={(event) =>
+                                void handleOAuthBindingLocalGatewayToggle(
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={oauthBindingSaving}
+                            />
+                            <span>
+                              {t(
+                                "codex.api.oauthBinding.useLocalGateway",
+                                "使用本地网关兼容模式",
+                              )}
+                            </span>
+                            <Info size={14} />
+                          </label>
                         )}
-                      </label>
+                      </div>
                       {oauthAccounts.length === 0 ? (
                         <div className="add-status error">
                           <CircleAlert size={16} />
@@ -13446,6 +13667,52 @@ export function CodexAccountsPage() {
                       )}
                     </strong>
                   </div>
+                  {resetCreditConfirmNextExpiresAt && (
+                    <div className="codex-reset-credit-confirm-expiry">
+                      <Clock size={14} />
+                      <span>
+                        {t("codex.quota.resetCreditNextExpiry", {
+                          time: formatResetCreditTime(
+                            resetCreditConfirmNextExpiresAt,
+                          ),
+                          defaultValue: "最近到期：{{time}}",
+                        })}
+                      </span>
+                    </div>
+                  )}
+                  {resetCreditConfirmCredits.length > 0 && (
+                    <div className="codex-reset-credit-confirm-details">
+                      <div className="codex-reset-credit-confirm-details-title">
+                        {t("codex.quota.resetCreditDetailsTitle", "重置次数明细")}
+                      </div>
+                      {resetCreditConfirmCredits.map((credit, index) => (
+                        <div
+                          className="codex-reset-credit-confirm-detail"
+                          key={credit.id || `${credit.status || "credit"}-${index}`}
+                        >
+                          <span
+                            className={`codex-reset-credit-confirm-detail-status ${getResetCreditStatusTone(credit)}`}
+                          >
+                            {getResetCreditStatusLabel(credit)}
+                          </span>
+                          <span>
+                            {t("codex.quota.resetCreditGrantedAt", "发放")}
+                            ：
+                            <strong>
+                              {formatResetCreditAbsoluteTime(credit.granted_at)}
+                            </strong>
+                          </span>
+                          <span>
+                            {t("codex.quota.resetCreditExpiresAt", "到期")}
+                            ：
+                            <strong>
+                              {formatResetCreditTime(credit.expires_at)}
+                            </strong>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <ModalErrorMessage
                     message={resetCreditConfirmError}
                     scrollKey={resetCreditConfirmErrorScrollKey}
