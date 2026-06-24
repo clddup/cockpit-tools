@@ -4,6 +4,7 @@ const BLOCKING_STATUS_CODES = new Set(["401", "403", "429"]);
 const BLOCKING_ERROR_CODES = new Set([
   "invalid_grant",
   "invalid_token",
+  "invalid_refresh_token",
   "refresh_token_expired",
   "refresh_token_invalidated",
   "refresh_token_reused",
@@ -42,6 +43,7 @@ export function isBlockingCodexQuotaError(
     lower.includes("429 too many requests") ||
     lower.includes("invalid_grant") ||
     lower.includes("invalid_token") ||
+    lower.includes("invalid_refresh_token") ||
     lower.includes("refresh_token_reused") ||
     lower.includes("refresh_token_expired") ||
     lower.includes("refresh_token_invalidated") ||

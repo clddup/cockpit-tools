@@ -1326,7 +1326,11 @@ fn classify_refresh_error(message: &str) -> CodexRefreshErrorKind {
     {
         return CodexRefreshErrorKind::RefreshTokenInvalidated;
     }
-    if lower.contains("invalid_grant") || lower.contains("invalid refresh token") {
+    if lower.contains("invalid_grant")
+        || lower.contains("invalid refresh token")
+        || lower.contains("invalid_refresh_token")
+        || lower.contains("invalid refresh_token")
+    {
         return CodexRefreshErrorKind::InvalidGrant;
     }
     CodexRefreshErrorKind::Other
@@ -7702,6 +7706,12 @@ mod tests {
         );
         assert!(region.contains("当前网络地区不支持刷新 Codex 授权"));
         assert!(!region.contains("请重新登录"));
+
+        let invalid_refresh = format_refresh_error_for_user(
+            "Token 刷新失败: status=401 Unauthorized, error_code=invalid_refresh_token",
+        );
+        assert!(invalid_refresh.contains("Codex 登录授权无效"));
+        assert!(invalid_refresh.contains("请重新登录"));
     }
 
     #[test]

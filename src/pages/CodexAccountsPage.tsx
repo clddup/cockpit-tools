@@ -6272,10 +6272,12 @@ export function CodexAccountsPage() {
         errorCode === "token_invalidated" ||
         errorCode === "invalid_grant" ||
         errorCode === "invalid_token" ||
+        errorCode === "invalid_refresh_token" ||
         rawMessage.includes("refresh_token_reused") ||
         rawMessage.includes("refresh_token_expired") ||
         rawMessage.includes("refresh_token_invalidated") ||
         rawMessage.includes("token_invalidated") ||
+        rawMessage.includes("invalid_refresh_token") ||
         rawMessage.includes("refresh_token 已被其它客户端或实例使用过") ||
         rawMessage.includes("your authentication token has been invalidated") ||
         rawMessage.includes("401 unauthorized") ||
@@ -7552,16 +7554,9 @@ export function CodexAccountsPage() {
         return;
       }
 
-      const firstFailure = results.find(
-        (result): result is PromiseRejectedResult =>
-          result.status === "rejected",
-      );
-      setMessage({
-        text: t("codex.refreshFailed", {
-          error: String(firstFailure?.reason ?? "").replace(/^Error:\s*/, ""),
-        }),
-        tone: "error",
-      });
+      // 单账号错误已经由 refreshQuota 写回各账号的 quota_error，
+      // 不再用顶部全局红条展示长错误。
+      return;
     } finally {
       setLocalAccessRefreshing(false);
     }
@@ -8035,16 +8030,9 @@ export function CodexAccountsPage() {
           return;
         }
 
-        const firstFailure = results.find(
-          (result): result is PromiseRejectedResult =>
-            result.status === "rejected",
-        );
-        setMessage({
-          text: t("codex.refreshFailed", {
-            error: String(firstFailure?.reason ?? "").replace(/^Error:\s*/, ""),
-          }),
-          tone: "error",
-        });
+        // 单账号错误已经由刷新流程写回各账号的 quota_error，
+        // 不再用顶部全局红条展示长错误。
+        return;
       } finally {
         setRefreshingGroupId(null);
       }

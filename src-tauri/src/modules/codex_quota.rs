@@ -1416,7 +1416,21 @@ async fn refresh_account_quota_once(
     account_id: &str,
     options: RefreshQuotaOptions,
 ) -> Result<CodexQuota, String> {
-    let mut account = codex_account::prepare_account_for_injection(account_id).await?;
+    let mut account = match codex_account::prepare_account_for_injection(account_id).await {
+        Ok(account) => account,
+        Err(e) => {
+            if let Some(mut account) = codex_account::load_account(account_id) {
+                write_quota_error(&mut account, e.clone());
+                if let Err(save_err) = codex_account::save_account(&account) {
+                    logger::log_warn(&format!(
+                        "写入 Codex 配额准备错误失败: account_id={}, error={}",
+                        account_id, save_err
+                    ));
+                }
+            }
+            return Err(e);
+        }
+    };
     if account.is_api_key_auth() {
         if is_new_api_account(&account) {
             let result = match fetch_new_api_quota(&account).await {
